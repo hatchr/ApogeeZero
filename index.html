@@ -110,6 +110,9 @@ let gameRunning = false, gameOverActive = false;
 let lastTime = 0, plasmaCD = 0, missileCD = 0;
 let invincTimer = 0;
 let shieldTimer = 0, spreadTimer = 0;
+let plasmaEnergy = 100, plasmaMax = 100, plasmaRecharge = 15; // per second
+let missileEnergy = 100, missileMax = 100, missileRecharge = 8; // per second
+let plasmaCost = 5, missileCost = 20;
 let camX = 0, camY = 0;
 let shakeX = 0, shakeY = 0, shakeDur = 0;
 
@@ -134,6 +137,7 @@ function initGame() {
   lives = 3; invincTimer = 0;
   plasmaCD = 0; missileCD = 0;
   shieldTimer = 0; spreadTimer = 0;
+  plasmaEnergy = plasmaMax; missileEnergy = missileMax;
   camX = 0; camY = 0;
   shakeX = 0; shakeY = 0; shakeDur = 0;
   makeStars();
@@ -437,9 +441,15 @@ function update(dt) {
     }
   }
 
+  // Recharge ammo
+  let plasmaRate = spreadTimer > 0 ? plasmaRecharge * 6 : plasmaRecharge;
+  plasmaEnergy = Math.min(plasmaMax, plasmaEnergy + plasmaRate * dt);
+  missileEnergy = Math.min(missileMax, missileEnergy + missileRecharge * dt);
+
   // Player shooting
   plasmaCD -= dt; missileCD -= dt;
-  if (mouseDown && plasmaCD <= 0) {
+  let pCost = spreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
+  if (mouseDown && plasmaCD <= 0 && plasmaEnergy >= pCost) {
     let fx = player.x + Math.cos(player.angle)*20;
     let fy = player.y + Math.sin(player.angle)*20;
     if (spreadTimer > 0) {
@@ -449,12 +459,14 @@ function update(dt) {
     } else {
       fireProjectile('player', fx, fy, player.angle, 'plasma');
     }
+    plasmaEnergy -= pCost;
     plasmaCD = 0.1;
   }
-  if (rightDown && missileCD <= 0) {
+  if (rightDown && missileCD <= 0 && missileEnergy >= missileCost) {
     let fx = player.x + Math.cos(player.angle)*20;
     let fy = player.y + Math.sin(player.angle)*20;
     fireProjectile('player', fx, fy, player.angle, 'missile');
+    missileEnergy -= missileCost;
     missileCD = 0.5;
   }
 
@@ -1110,12 +1122,44 @@ function drawHUD() {
   ctx.font = '12px Courier New';
   ctx.fillText('HP', barX + barW + 8, barY + 13);
 
+  // Plasma energy bar
+  let ammoBarW = 200, ammoBarH = 8, ammoBarX = barX, ammoBarY = barY + barH + 4;
+  ctx.fillStyle = '#1118';
+  ctx.fillRect(ammoBarX - 2, ammoBarY - 1, ammoBarW + 4, ammoBarH + 2);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(ammoBarX, ammoBarY, ammoBarW, ammoBarH);
+  let plasmaPct = plasmaEnergy / plasmaMax;
+  ctx.fillStyle = '#0ff';
+  ctx.shadowColor = '#0ff';
+  ctx.shadowBlur = 6;
+  ctx.fillRect(ammoBarX, ammoBarY, ammoBarW * plasmaPct, ammoBarH);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#0ff';
+  ctx.font = '10px Courier New';
+  ctx.fillText('PLASMA', ammoBarX + ammoBarW + 8, ammoBarY + 8);
+
+  // Missile energy bar
+  let missBarY = ammoBarY + ammoBarH + 3;
+  ctx.fillStyle = '#1118';
+  ctx.fillRect(ammoBarX - 2, missBarY - 1, ammoBarW + 4, ammoBarH + 2);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(ammoBarX, missBarY, ammoBarW, ammoBarH);
+  let missilePct = missileEnergy / missileMax;
+  ctx.fillStyle = '#0f0';
+  ctx.shadowColor = '#0f0';
+  ctx.shadowBlur = 6;
+  ctx.fillRect(ammoBarX, missBarY, ammoBarW * missilePct, ammoBarH);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#0f0';
+  ctx.font = '10px Courier New';
+  ctx.fillText('MISSILE', ammoBarX + ammoBarW + 8, missBarY + 8);
+
   // Lives
   ctx.fillStyle = '#0ff';
   ctx.shadowColor = '#0ff';
   ctx.shadowBlur = 6;
   ctx.font = '16px Courier New';
-  ctx.fillText('LIVES: ' + lives, barX, barY + 38);
+  ctx.fillText('LIVES: ' + lives, barX, missBarY + ammoBarH + 18);
   ctx.shadowBlur = 0;
 
   // Score
@@ -1137,7 +1181,7 @@ function drawHUD() {
   ctx.textAlign = 'left';
 
   // Active powerup indicators
-  let puY = barY + 58;
+  let puY = missBarY + ammoBarH + 36;
   if (shieldTimer > 0) {
     ctx.fillStyle = '#48f';
     ctx.shadowColor = '#48f';
