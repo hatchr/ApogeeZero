@@ -1,0 +1,1003 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Star Destroyer</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; cursor: crosshair; font-family: 'Courier New', monospace; }
+canvas { display: block; }
+#gameOver {
+  display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.85); z-index: 10;
+  flex-direction: column; align-items: center; justify-content: center;
+}
+#gameOver.active { display: flex; }
+#gameOver h1 { color: #f44; font-size: 48px; text-shadow: 0 0 20px #f44; margin-bottom: 20px; }
+#gameOver .stats { color: #0ff; font-size: 22px; margin: 8px 0; text-shadow: 0 0 10px #0ff; }
+#gameOver .leaderboard { margin-top: 20px; color: #fff; font-size: 16px; }
+#gameOver .leaderboard h2 { color: #ff0; font-size: 24px; text-shadow: 0 0 10px #ff0; margin-bottom: 10px; }
+#gameOver .lb-entry { margin: 4px 0; color: #aef; }
+#gameOver .lb-entry.gold { color: #ff0; }
+#nameInput {
+  background: transparent; border: 2px solid #0ff; color: #0ff; font-family: inherit;
+  font-size: 20px; padding: 8px 16px; margin: 15px 0; text-align: center; outline: none;
+}
+#nameInput::placeholder { color: #066; }
+#submitScore {
+  background: transparent; border: 2px solid #0f0; color: #0f0; font-family: inherit;
+  font-size: 18px; padding: 8px 24px; cursor: pointer; margin: 5px;
+}
+#submitScore:hover { background: #0f02; }
+#restartBtn {
+  background: transparent; border: 2px solid #0ff; color: #0ff; font-family: inherit;
+  font-size: 18px; padding: 8px 24px; cursor: pointer; margin: 5px;
+}
+#restartBtn:hover { background: #0ff2; }
+#startScreen {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  background: rgba(0,0,0,0.9); z-index: 10;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+#startScreen.hidden { display: none; }
+#startScreen h1 { color: #0ff; font-size: 56px; text-shadow: 0 0 30px #0ff; margin-bottom: 10px; }
+#startScreen .sub { color: #88f; font-size: 18px; margin-bottom: 30px; }
+#startScreen .controls { color: #aaa; font-size: 14px; line-height: 2; margin-bottom: 30px; text-align: center; }
+#startScreen .controls span { color: #0ff; }
+#startBtn {
+  background: transparent; border: 2px solid #0ff; color: #0ff; font-family: inherit;
+  font-size: 24px; padding: 12px 40px; cursor: pointer;
+}
+#startBtn:hover { background: #0ff2; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="startScreen">
+  <h1>STAR DESTROYER</h1>
+  <div class="sub">Endless Survival</div>
+  <div class="controls">
+    <span>W A S D</span> — Thrust<br>
+    <span>Mouse</span> — Aim (left/right to rotate)<br>
+    <span>Left Click</span> — Plasma Bolt<br>
+    <span>Right Click</span> — Missile<br>
+  </div>
+  <button id="startBtn">START GAME</button>
+</div>
+<div id="gameOver">
+  <h1>GAME OVER</h1>
+  <div class="stats" id="finalScore"></div>
+  <div class="stats" id="finalWave"></div>
+  <input type="text" id="nameInput" placeholder="Enter your name" maxlength="12">
+  <div>
+    <button id="submitScore">SAVE SCORE</button>
+    <button id="restartBtn">PLAY AGAIN</button>
+  </div>
+  <div class="leaderboard" id="leaderboard"></div>
+</div>
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+resize();
+window.addEventListener('resize', resize);
+
+// Input
+const keys = {};
+let mouseDX = 0, mouseDown = false, rightDown = false;
+let pointerLocked = false;
+window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
+window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+window.addEventListener('mousemove', e => { mouseDX += e.movementX; });
+canvas.addEventListener('mousedown', e => {
+  if (!pointerLocked) { canvas.requestPointerLock(); return; }
+  if (e.button === 0) mouseDown = true;
+  if (e.button === 2) rightDown = true;
+});
+window.addEventListener('mouseup', e => { if (e.button === 0) mouseDown = false; if (e.button === 2) rightDown = false; });
+window.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('pointerlockchange', () => {
+  pointerLocked = document.pointerLockElement === canvas;
+  if (!pointerLocked) { mouseDown = false; rightDown = false; }
+});
+
+// Game state
+let player, enemies, projectiles, particles, stars, planets, powerups;
+let score, wave, waveTimer, waveEnemiesLeft, enemiesAlive, lives;
+let gameRunning = false, gameOverActive = false;
+let lastTime = 0, plasmaCD = 0, missileCD = 0;
+let invincTimer = 0;
+let shieldTimer = 0, spreadTimer = 0;
+let camX = 0, camY = 0;
+let shakeX = 0, shakeY = 0, shakeDur = 0;
+
+// Stars
+function makeStars() {
+  stars = [];
+  for (let i = 0; i < 300; i++) {
+    stars.push({
+      x: Math.random() * 4000 - 2000,
+      y: Math.random() * 4000 - 2000,
+      size: Math.random() * 2 + 0.5,
+      depth: Math.random() * 0.8 + 0.2,
+      brightness: Math.random() * 155 + 100
+    });
+  }
+}
+
+function initGame() {
+  player = { x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, hp: 100, maxHp: 100, radius: 16 };
+  enemies = []; projectiles = []; particles = []; powerups = [];
+  score = 0; wave = 0; waveTimer = 2; waveEnemiesLeft = 0; enemiesAlive = 0;
+  lives = 3; invincTimer = 0;
+  plasmaCD = 0; missileCD = 0;
+  shieldTimer = 0; spreadTimer = 0;
+  camX = 0; camY = 0;
+  shakeX = 0; shakeY = 0; shakeDur = 0;
+  makeStars();
+  makePlanets();
+  nextWave();
+}
+
+function makePlanets() {
+  planets = [];
+  // Asteroids — small, gray
+  let asteroidColors = [
+    { base: '#3a3a3a', accent: '#5a5a5a', glow: '#888' },
+    { base: '#4a4440', accent: '#6a6460', glow: '#998' },
+    { base: '#2e3030', accent: '#4e5050', glow: '#778' },
+    { base: '#3f3833', accent: '#5f5853', glow: '#887' },
+    { base: '#333638', accent: '#535658', glow: '#789' },
+  ];
+  let asteroidCount = 2 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < asteroidCount; i++) {
+    let r = 150 + Math.random() * 250;
+    let x, y, tooClose;
+    do {
+      x = (Math.random() - 0.5) * 3000;
+      y = (Math.random() - 0.5) * 3000;
+      tooClose = (x*x + y*y) < 400*400;
+      for (let p of planets) {
+        let ddx = x - p.x, ddy = y - p.y;
+        if (Math.sqrt(ddx*ddx + ddy*ddy) < r + p.radius + 150) tooClose = true;
+      }
+    } while (tooClose);
+    let c = asteroidColors[i % asteroidColors.length];
+    planets.push({ x, y, radius: r, mass: r * 80, color: c.base, accent: c.accent, glow: c.glow });
+  }
+  // Planets — huge, colorful
+  let planetColors = [
+    { base: '#a04020', accent: '#d06830', glow: '#f84' },
+    { base: '#2060a0', accent: '#40a0e0', glow: '#4cf' },
+    { base: '#208040', accent: '#40c060', glow: '#4f8' },
+    { base: '#802080', accent: '#c040c0', glow: '#f4f' },
+    { base: '#a08020', accent: '#e0c040', glow: '#fe4' },
+  ];
+  let planetCount = 1 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < planetCount; i++) {
+    let r = 1500 + Math.random() * 2500;
+    let x, y, tooClose;
+    do {
+      x = (Math.random() - 0.5) * 12000;
+      y = (Math.random() - 0.5) * 12000;
+      tooClose = (x*x + y*y) < (r + 600) * (r + 600);
+      for (let p of planets) {
+        let ddx = x - p.x, ddy = y - p.y;
+        if (Math.sqrt(ddx*ddx + ddy*ddy) < r + p.radius + 500) tooClose = true;
+      }
+    } while (tooClose);
+    let c = planetColors[i % planetColors.length];
+    planets.push({ x, y, radius: r, mass: r * 80, color: c.base, accent: c.accent, glow: c.glow });
+  }
+}
+
+function nextWave() {
+  wave++;
+  let count = 3 + wave * 2;
+  if (count > 30) count = 30;
+  waveEnemiesLeft = count;
+  enemiesAlive = 0;
+  waveTimer = 1.5;
+}
+
+function spawnEnemy() {
+  let angle = Math.random() * Math.PI * 2;
+  let dist = Math.max(W, H) * 0.7 + 100;
+  let sx = player.x + Math.cos(angle) * dist;
+  let sy = player.y + Math.sin(angle) * dist;
+  let diff = Math.min(wave, 20);
+  let roll = Math.random();
+  let type;
+  if (wave < 3) {
+    type = 'drone';
+  } else if (wave < 5) {
+    type = roll < 0.6 ? 'drone' : 'gunship';
+  } else {
+    if (roll < 0.4) type = 'drone';
+    else if (roll < 0.75) type = 'gunship';
+    else type = 'bruiser';
+  }
+  let e = { x: sx, y: sy, vx: 0, vy: 0, angle: 0, type, radius: 14, shootCD: Math.random() * 2 + 1 };
+  if (type === 'drone') {
+    e.hp = 20 + diff * 3; e.maxHp = e.hp; e.speed = 220 + diff * 5; e.color = '#f44'; e.accent = '#f88'; e.dmg = 8; e.score = 100; e.radius = 12;
+    e.preferDist = 180 + Math.random() * 80;
+    e.orbitDir = Math.random() < 0.5 ? 1 : -1;
+  } else if (type === 'gunship') {
+    e.hp = 50 + diff * 5; e.maxHp = e.hp; e.speed = 150 + diff * 3; e.color = '#f80'; e.accent = '#fc4'; e.dmg = 12; e.score = 250; e.radius = 16;
+    e.preferDist = 280 + Math.random() * 120;
+    e.orbitDir = Math.random() < 0.5 ? 1 : -1;
+  } else {
+    e.hp = 120 + diff * 10; e.maxHp = e.hp; e.speed = 80 + diff * 2; e.color = '#a0f'; e.accent = '#c6f'; e.dmg = 25; e.score = 500; e.radius = 22;
+    e.preferDist = 320 + Math.random() * 100;
+    e.orbitDir = Math.random() < 0.5 ? 1 : -1;
+  }
+  enemies.push(e);
+  enemiesAlive++;
+}
+
+function screenShake(dur) { shakeDur = Math.max(shakeDur, dur); }
+
+function spawnParticles(x, y, color, count, speed) {
+  for (let i = 0; i < count; i++) {
+    let a = Math.random() * Math.PI * 2;
+    let s = Math.random() * speed;
+    particles.push({ x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s, life: 0.5 + Math.random()*0.5, maxLife: 0.8, color, size: Math.random()*3+1 });
+  }
+}
+
+function fireProjectile(owner, x, y, angle, type) {
+  let p = { x, y, angle, owner, type };
+  if (type === 'plasma') {
+    p.speed = 600; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
+    p.dmg = 10; p.radius = 3; p.life = 2; p.color = owner === 'player' ? '#0ff' : '#f88';
+  } else if (type === 'missile') {
+    p.speed = 300; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
+    p.dmg = 35; p.radius = 5; p.life = 3; p.color = owner === 'player' ? '#0f0' : '#f0f';
+  } else if (type === 'enemyPlasma') {
+    p.speed = 350; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
+    p.dmg = 8; p.radius = 3; p.life = 2.5; p.color = '#f84';
+  } else if (type === 'enemyMissile') {
+    p.speed = 200; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
+    p.dmg = 25; p.radius = 5; p.life = 3; p.color = '#f0f';
+  }
+  projectiles.push(p);
+}
+
+function leadShot(ex, ey, evx, evy, tx, ty, tvx, tvy, bulletSpeed) {
+  let dx = tx - ex, dy = ty - ey;
+  let dvx = tvx - evx, dvy = tvy - evy;
+  let a = dvx*dvx + dvy*dvy - bulletSpeed*bulletSpeed;
+  let b = 2*(dx*dvx + dy*dvy);
+  let c = dx*dx + dy*dy;
+  let disc = b*b - 4*a*c;
+  if (Math.abs(a) < 0.001 || disc < 0) return Math.atan2(dy, dx);
+  let t = (-b - Math.sqrt(disc)) / (2*a);
+  if (t < 0) t = (-b + Math.sqrt(disc)) / (2*a);
+  if (t < 0) return Math.atan2(dy, dx);
+  t = Math.min(t, 2);
+  return Math.atan2(dy + dvy*t, dx + dvx*t);
+}
+
+function update(dt) {
+  if (!gameRunning) return;
+
+  // Invincibility
+  if (invincTimer > 0) invincTimer -= dt;
+
+  // Gravity from planets — apply to player, enemies, projectiles
+  // G scales with planet radius: avg radius ~55, avg G = 300
+  function applyGravity(obj) {
+    for (let pl of planets) {
+      let dx = pl.x - obj.x, dy = pl.y - obj.y;
+      let distSq = dx*dx + dy*dy;
+      let dist = Math.sqrt(distSq);
+      let minDist = pl.radius + (obj.radius || 3);
+      if (dist < minDist) dist = minDist;
+      let scaledG = 600 * (pl.radius / 275);
+      let force = scaledG * pl.mass / (dist * dist);
+      let ax = (dx / dist) * force;
+      let ay = (dy / dist) * force;
+      obj.vx += ax * dt;
+      obj.vy += ay * dt;
+    }
+  }
+  applyGravity(player);
+  for (let e of enemies) applyGravity(e);
+  for (let p of projectiles) applyGravity(p);
+
+  // Planet collisions
+  for (let pl of planets) {
+    // Player
+    let dx = player.x - pl.x, dy = player.y - pl.y;
+    let dist = Math.sqrt(dx*dx + dy*dy);
+    if (dist < pl.radius + player.radius) {
+      // Push out
+      let nx = dx/dist, ny = dy/dist;
+      player.x = pl.x + nx * (pl.radius + player.radius);
+      player.y = pl.y + ny * (pl.radius + player.radius);
+      // Bounce + damage based on impact speed
+      let impactSpeed = Math.abs(player.vx * nx + player.vy * ny);
+      player.vx = nx * impactSpeed * 0.5;
+      player.vy = ny * impactSpeed * 0.5;
+      if (impactSpeed > 15 && invincTimer <= 0) {
+        let dmg = Math.max(3, Math.floor(impactSpeed * 0.15));
+        player.hp -= dmg;
+        screenShake(0.1);
+        spawnParticles(player.x, player.y, pl.glow, 6, 80);
+        if (player.hp <= 0) {
+          lives--;
+          spawnParticles(player.x, player.y, '#0ff', 30, 250);
+          screenShake(0.3);
+          if (lives <= 0) { gameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; }
+        }
+      }
+    }
+    // Enemies
+    for (let e of enemies) {
+      let edx = e.x - pl.x, edy = e.y - pl.y;
+      let edist = Math.sqrt(edx*edx + edy*edy);
+      if (edist < pl.radius + e.radius) {
+        let nx = edx/edist, ny = edy/edist;
+        e.x = pl.x + nx * (pl.radius + e.radius);
+        e.y = pl.y + ny * (pl.radius + e.radius);
+        let impactSpeed = Math.abs(e.vx * nx + e.vy * ny);
+        e.vx = nx * impactSpeed * 0.5;
+        e.vy = ny * impactSpeed * 0.5;
+        if (impactSpeed > 15) {
+          e.hp -= Math.max(3, Math.floor(impactSpeed * 0.15));
+          spawnParticles(e.x, e.y, pl.glow, 4, 60);
+          if (e.hp <= 0) {
+            score += e.score;
+            spawnParticles(e.x, e.y, e.color, 20, 200);
+            screenShake(0.1);
+            enemies.splice(enemies.indexOf(e), 1);
+            enemiesAlive--;
+          }
+        }
+      }
+    }
+    // Projectiles — destroy on planet hit
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      let p = projectiles[i];
+      let pdx = p.x - pl.x, pdy = p.y - pl.y;
+      if (pdx*pdx + pdy*pdy < (pl.radius + p.radius) * (pl.radius + p.radius)) {
+        spawnParticles(p.x, p.y, p.color, 4, 60);
+        projectiles.splice(i, 1);
+      }
+    }
+  }
+
+  // Player rotation — relative mouse movement, immediate response
+  player.angle += mouseDX * 0.004;
+  mouseDX = 0;
+
+  // Player thrust
+  let thrust = 300;
+  let ax = 0, ay = 0;
+  if (keys['w']) { ax += Math.cos(player.angle) * thrust; ay += Math.sin(player.angle) * thrust; }
+  if (keys['s']) { ax -= Math.cos(player.angle) * thrust * 0.5; ay -= Math.sin(player.angle) * thrust * 0.5; }
+  if (keys['a']) { ax += Math.cos(player.angle - Math.PI/2) * thrust * 0.7; ay += Math.sin(player.angle - Math.PI/2) * thrust * 0.7; }
+  if (keys['d']) { ax += Math.cos(player.angle + Math.PI/2) * thrust * 0.7; ay += Math.sin(player.angle + Math.PI/2) * thrust * 0.7; }
+  player.vx += ax * dt; player.vy += ay * dt;
+  let damp = Math.pow(0.98, dt * 60);
+  player.vx *= damp; player.vy *= damp;
+  player.x += player.vx * dt; player.y += player.vy * dt;
+
+  // Engine particles
+  if (keys['w']) {
+    let ex = player.x - Math.cos(player.angle)*18;
+    let ey = player.y - Math.sin(player.angle)*18;
+    for (let i = 0; i < 2; i++) {
+      let spread = (Math.random()-0.5)*0.6;
+      let a = player.angle + Math.PI + spread;
+      let s = 80 + Math.random()*60;
+      particles.push({ x: ex, y: ey, vx: Math.cos(a)*s + player.vx*0.3, vy: Math.sin(a)*s + player.vy*0.3, life: 0.3+Math.random()*0.2, maxLife: 0.5, color: '#0af', size: 2+Math.random()*2 });
+    }
+  }
+
+  // Player shooting
+  plasmaCD -= dt; missileCD -= dt;
+  if (mouseDown && plasmaCD <= 0) {
+    let fx = player.x + Math.cos(player.angle)*20;
+    let fy = player.y + Math.sin(player.angle)*20;
+    if (spreadTimer > 0) {
+      fireProjectile('player', fx, fy, player.angle - 0.2, 'plasma');
+      fireProjectile('player', fx, fy, player.angle, 'plasma');
+      fireProjectile('player', fx, fy, player.angle + 0.2, 'plasma');
+    } else {
+      fireProjectile('player', fx, fy, player.angle, 'plasma');
+    }
+    plasmaCD = 0.1;
+  }
+  if (rightDown && missileCD <= 0) {
+    let fx = player.x + Math.cos(player.angle)*20;
+    let fy = player.y + Math.sin(player.angle)*20;
+    fireProjectile('player', fx, fy, player.angle, 'missile');
+    missileCD = 0.5;
+  }
+
+  // Wave spawning
+  if (waveEnemiesLeft > 0) {
+    waveTimer -= dt;
+    if (waveTimer <= 0) {
+      spawnEnemy();
+      waveEnemiesLeft--;
+      waveTimer = Math.max(0.3, 1.5 - wave * 0.05);
+    }
+  } else if (enemiesAlive <= 0) {
+    score += wave * 200;
+    nextWave();
+  }
+
+  // Enemy AI
+  for (let e of enemies) {
+    let dx = player.x - e.x, dy = player.y - e.y;
+    let dist = Math.sqrt(dx*dx + dy*dy);
+    let targetAngle = Math.atan2(dy, dx);
+    e.angle = targetAngle;
+
+    // Approach/retreat to maintain preferred distance
+    let radialForce = 0;
+    if (dist > e.preferDist + 40) {
+      radialForce = 1; // move toward player
+    } else if (dist < e.preferDist - 40) {
+      radialForce = -1.2; // back away
+    } else {
+      // Small nudge to stay centered in the band
+      radialForce = (dist - e.preferDist) * 0.01;
+    }
+
+    // Orbit perpendicular to the player
+    let orbitStrength = e.type === 'drone' ? 1.0 : e.type === 'gunship' ? 1.2 : 0.6;
+    let perp = targetAngle + Math.PI/2 * e.orbitDir;
+
+    let accel = e.speed * dt * 1.5;
+    e.vx += Math.cos(targetAngle) * radialForce * accel;
+    e.vy += Math.sin(targetAngle) * radialForce * accel;
+    e.vx += Math.cos(perp) * orbitStrength * accel;
+    e.vy += Math.sin(perp) * orbitStrength * accel;
+
+
+    let espd = Math.sqrt(e.vx*e.vx + e.vy*e.vy);
+    if (espd > e.speed) { e.vx *= e.speed/espd; e.vy *= e.speed/espd; }
+    e.vx *= Math.pow(0.97, dt*60); e.vy *= Math.pow(0.97, dt*60);
+    e.x += e.vx * dt; e.y += e.vy * dt;
+
+    // Engine exhaust trail — emits from back of ship
+    if (espd > 30) {
+      let ex = e.x - Math.cos(e.angle) * e.radius;
+      let ey = e.y - Math.sin(e.angle) * e.radius;
+      let spread = (Math.random() - 0.5) * 0.6;
+      let a = e.angle + Math.PI + spread;
+      let s = 40 + Math.random() * 40;
+      particles.push({ x: ex, y: ey, vx: Math.cos(a)*s + e.vx*0.3, vy: Math.sin(a)*s + e.vy*0.3, life: 0.2+Math.random()*0.15, maxLife: 0.35, color: e.color, size: 1.5+Math.random()*1.5 });
+    }
+
+    // Shooting
+    e.shootCD -= dt;
+    if (e.shootCD <= 0 && dist < 800) {
+      let bSpeed = e.type === 'bruiser' ? 200 : 350;
+      let shotAngle = leadShot(e.x, e.y, e.vx, e.vy, player.x, player.y, player.vx, player.vy, bSpeed);
+      let fx = e.x + Math.cos(shotAngle)*20;
+      let fy = e.y + Math.sin(shotAngle)*20;
+      if (e.type === 'bruiser') {
+        fireProjectile('enemy', fx, fy, shotAngle, 'enemyMissile');
+        e.shootCD = 2 + Math.random();
+      } else {
+        fireProjectile('enemy', fx, fy, shotAngle, 'enemyPlasma');
+        e.shootCD = e.type === 'drone' ? 1.2 + Math.random()*0.5 : 0.7 + Math.random()*0.4;
+      }
+    }
+  }
+
+  // Projectiles
+  for (let i = projectiles.length - 1; i >= 0; i--) {
+    let p = projectiles[i];
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.life -= dt;
+    // Trail
+    if (Math.random() < 0.5) {
+      particles.push({ x: p.x, y: p.y, vx: (Math.random()-0.5)*20, vy: (Math.random()-0.5)*20, life: 0.15, maxLife: 0.2, color: p.color, size: p.radius*0.6 });
+    }
+    if (p.life <= 0) { projectiles.splice(i, 1); continue; }
+
+    // Collision with enemies (player projectiles)
+    if (p.owner === 'player') {
+      for (let j = enemies.length - 1; j >= 0; j--) {
+        let e = enemies[j];
+        let ddx = p.x - e.x, ddy = p.y - e.y;
+        if (ddx*ddx + ddy*ddy < (p.radius + e.radius) * (p.radius + e.radius)) {
+          e.hp -= p.dmg;
+          spawnParticles(p.x, p.y, e.color, 5, 100);
+          projectiles.splice(i, 1);
+          if (e.hp <= 0) {
+            score += e.score;
+            spawnParticles(e.x, e.y, e.color, 20, 200);
+            spawnParticles(e.x, e.y, '#ff0', 10, 150);
+            screenShake(0.15);
+            // Chance to drop powerup
+            if (Math.random() < 0.2) {
+              let types = ['health', 'shield', 'spread'];
+              let t = types[Math.floor(Math.random() * types.length)];
+              powerups.push({ x: e.x, y: e.y, type: t, life: 15, radius: 12 });
+            }
+            enemies.splice(j, 1);
+            enemiesAlive--;
+          }
+          break;
+        }
+      }
+    }
+    // Collision with player (enemy projectiles)
+    if (p.owner === 'enemy' && invincTimer <= 0) {
+      let ddx = p.x - player.x, ddy = p.y - player.y;
+      if (ddx*ddx + ddy*ddy < (p.radius + player.radius) * (p.radius + player.radius)) {
+        if (shieldTimer > 0) {
+          spawnParticles(p.x, p.y, '#48f', 6, 100);
+          projectiles.splice(i, 1);
+          continue;
+        }
+        player.hp -= p.dmg;
+        spawnParticles(p.x, p.y, '#0ff', 8, 120);
+        screenShake(0.1);
+        projectiles.splice(i, 1);
+        if (player.hp <= 0) {
+          lives--;
+          spawnParticles(player.x, player.y, '#0ff', 30, 250);
+          spawnParticles(player.x, player.y, '#fff', 15, 200);
+          screenShake(0.3);
+          if (lives <= 0) {
+            gameOver();
+          } else {
+            player.hp = player.maxHp;
+            player.vx = 0; player.vy = 0;
+            invincTimer = 2.5;
+          }
+        }
+      }
+    }
+  }
+
+  // Enemy-player collision
+  for (let j = enemies.length - 1; j >= 0; j--) {
+    let e = enemies[j];
+    let ddx = e.x - player.x, ddy = e.y - player.y;
+    if (ddx*ddx + ddy*ddy < (e.radius + player.radius) * (e.radius + player.radius)) {
+      if (invincTimer <= 0 && shieldTimer <= 0) {
+        player.hp -= 15;
+        screenShake(0.15);
+        spawnParticles(player.x, player.y, '#0ff', 8, 100);
+        if (player.hp <= 0) {
+          lives--;
+          spawnParticles(player.x, player.y, '#0ff', 30, 250);
+          screenShake(0.3);
+          if (lives <= 0) { gameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; }
+        }
+      }
+      // Push enemy away
+      let pushA = Math.atan2(ddy, ddx);
+      e.vx += Math.cos(pushA) * 200;
+      e.vy += Math.sin(pushA) * 200;
+    }
+  }
+
+  // Powerup timers
+  if (shieldTimer > 0) shieldTimer -= dt;
+  if (spreadTimer > 0) spreadTimer -= dt;
+
+  // Powerups — pickup and expire
+  for (let i = powerups.length - 1; i >= 0; i--) {
+    let pu = powerups[i];
+    pu.life -= dt;
+    if (pu.life <= 0) { powerups.splice(i, 1); continue; }
+    let dx = player.x - pu.x, dy = player.y - pu.y;
+    if (dx*dx + dy*dy < (player.radius + pu.radius) * (player.radius + pu.radius)) {
+      if (pu.type === 'health') {
+        player.hp = Math.min(player.maxHp, player.hp + 40);
+        spawnParticles(pu.x, pu.y, '#0f0', 10, 80);
+      } else if (pu.type === 'shield') {
+        shieldTimer = 8;
+        spawnParticles(pu.x, pu.y, '#48f', 10, 80);
+      } else if (pu.type === 'spread') {
+        spreadTimer = 10;
+        spawnParticles(pu.x, pu.y, '#f0f', 10, 80);
+      }
+      powerups.splice(i, 1);
+    }
+  }
+
+  // Particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    let p = particles[i];
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // Camera
+  camX = player.x; camY = player.y;
+  if (shakeDur > 0) {
+    shakeX = (Math.random()-0.5) * 8; shakeY = (Math.random()-0.5) * 8;
+    shakeDur -= dt;
+  } else { shakeX = 0; shakeY = 0; }
+}
+
+function drawShip(x, y, angle, color, accent, radius, hp, maxHp, isPlayer) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(angle);
+
+  // Glow
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 15;
+
+  if (isPlayer) {
+    // Player ship — sleek arrow
+    ctx.fillStyle = '#112';
+    ctx.beginPath();
+    ctx.moveTo(radius * 1.3, 0);
+    ctx.lineTo(-radius * 0.9, -radius * 0.8);
+    ctx.lineTo(-radius * 0.4, 0);
+    ctx.lineTo(-radius * 0.9, radius * 0.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Accent lines
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(radius * 0.8, 0);
+    ctx.lineTo(-radius * 0.2, -radius * 0.45);
+    ctx.moveTo(radius * 0.8, 0);
+    ctx.lineTo(-radius * 0.2, radius * 0.45);
+    ctx.stroke();
+    // Cockpit
+    ctx.fillStyle = accent;
+    ctx.beginPath();
+    ctx.arc(radius * 0.3, 0, 3, 0, Math.PI*2);
+    ctx.fill();
+  } else {
+    // Enemy ships
+    ctx.fillStyle = '#111';
+    if (radius > 18) {
+      // Bruiser — hexagonal
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        let a = i * Math.PI/3;
+        ctx.lineTo(Math.cos(a)*radius, Math.sin(a)*radius);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius*0.5, 0, Math.PI*2);
+      ctx.stroke();
+    } else if (radius > 14) {
+      // Gunship — diamond-ish
+      ctx.beginPath();
+      ctx.moveTo(radius*1.1, 0);
+      ctx.lineTo(0, -radius*0.7);
+      ctx.lineTo(-radius*0.8, -radius*0.5);
+      ctx.lineTo(-radius*0.6, 0);
+      ctx.lineTo(-radius*0.8, radius*0.5);
+      ctx.lineTo(0, radius*0.7);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // Wing accents
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(radius*0.5, -radius*0.2);
+      ctx.lineTo(-radius*0.3, -radius*0.45);
+      ctx.moveTo(radius*0.5, radius*0.2);
+      ctx.lineTo(-radius*0.3, radius*0.45);
+      ctx.stroke();
+    } else {
+      // Drone — small triangle
+      ctx.beginPath();
+      ctx.moveTo(radius, 0);
+      ctx.lineTo(-radius*0.7, -radius*0.7);
+      ctx.lineTo(-radius*0.3, 0);
+      ctx.lineTo(-radius*0.7, radius*0.7);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    // Core dot
+    ctx.fillStyle = accent;
+    ctx.shadowBlur = 10;
+    ctx.beginPath();
+    ctx.arc(0, 0, 2, 0, Math.PI*2);
+    ctx.fill();
+  }
+  ctx.shadowBlur = 0;
+  ctx.restore();
+
+  // HP bar (enemies only)
+  if (!isPlayer && hp < maxHp) {
+    let bw = radius * 2;
+    let bx = x - bw/2, by = y - radius - 10;
+    ctx.fillStyle = '#333';
+    ctx.fillRect(bx, by, bw, 3);
+    ctx.fillStyle = color;
+    ctx.fillRect(bx, by, bw * (hp/maxHp), 3);
+  }
+}
+
+function draw() {
+  ctx.fillStyle = '#080810';
+  ctx.fillRect(0, 0, W, H);
+
+  if (!player) return;
+
+  let ox = -camX + W/2 + shakeX;
+  let oy = -camY + H/2 + shakeY;
+
+  // Stars (parallax)
+  for (let s of stars) {
+    let sx = ((s.x - camX * s.depth) % 2000 + 3000) % 2000 - 1000 + W/2;
+    let sy = ((s.y - camY * s.depth) % 2000 + 3000) % 2000 - 1000 + H/2;
+    ctx.fillStyle = `rgba(${s.brightness},${s.brightness},${Math.min(255,s.brightness+50)},${0.5+s.depth*0.5})`;
+    ctx.fillRect(sx + shakeX, sy + shakeY, s.size, s.size);
+  }
+
+  ctx.save();
+  ctx.translate(ox, oy);
+
+  // Planets
+  for (let pl of planets) {
+    // Glow
+    ctx.shadowColor = pl.glow;
+    ctx.shadowBlur = 20;
+    // Body
+    let grad = ctx.createRadialGradient(pl.x - pl.radius*0.3, pl.y - pl.radius*0.3, pl.radius*0.1, pl.x, pl.y, pl.radius);
+    grad.addColorStop(0, pl.accent);
+    grad.addColorStop(1, pl.color);
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(pl.x, pl.y, pl.radius, 0, Math.PI*2);
+    ctx.fill();
+    // Outline
+    ctx.strokeStyle = pl.glow;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    // Surface detail — a couple of darker patches
+    ctx.fillStyle = 'rgba(0,0,0,0.2)';
+    ctx.beginPath();
+    ctx.arc(pl.x + pl.radius*0.25, pl.y + pl.radius*0.15, pl.radius*0.3, 0, Math.PI*2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(pl.x - pl.radius*0.3, pl.y - pl.radius*0.25, pl.radius*0.18, 0, Math.PI*2);
+    ctx.fill();
+  }
+
+  // Particles
+  for (let p of particles) {
+    let alpha = Math.max(0, p.life / p.maxLife);
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 6;
+    ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+
+  // Projectiles
+  for (let p of projectiles) {
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 12;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
+    ctx.fill();
+    if (p.radius >= 5) {
+      // Missile — draw a tail
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x - Math.cos(p.angle)*12, p.y - Math.sin(p.angle)*12);
+      ctx.stroke();
+    }
+  }
+  ctx.shadowBlur = 0;
+
+  // Powerups
+  for (let pu of powerups) {
+    let bob = Math.sin(Date.now() * 0.005) * 3;
+    let col, symbol;
+    if (pu.type === 'health') { col = '#0f0'; symbol = '+'; }
+    else if (pu.type === 'shield') { col = '#48f'; symbol = 'S'; }
+    else { col = '#f0f'; symbol = '*'; }
+    // Fading when about to expire
+    ctx.globalAlpha = pu.life < 3 ? 0.3 + 0.7 * (pu.life / 3) : 1;
+    ctx.shadowColor = col;
+    ctx.shadowBlur = 15;
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(pu.x, pu.y + bob, pu.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = col;
+    ctx.font = 'bold 14px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText(symbol, pu.x, pu.y + bob + 5);
+    ctx.textAlign = 'left';
+  }
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+
+  // Enemies
+  for (let e of enemies) {
+    drawShip(e.x, e.y, e.angle, e.color, e.accent, e.radius, e.hp, e.maxHp, false);
+  }
+
+  // Player
+  if (invincTimer > 0 && Math.floor(invincTimer * 10) % 2 === 0) {
+    // Blink
+  } else {
+    drawShip(player.x, player.y, player.angle, '#0cf', '#4ef', player.radius, player.hp, player.maxHp, true);
+  }
+
+  // Shield effect around player
+  if (shieldTimer > 0) {
+    let alpha = shieldTimer < 2 ? shieldTimer / 2 : 0.6;
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = '#48f';
+    ctx.shadowColor = '#48f';
+    ctx.shadowBlur = 20;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, player.radius + 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 0;
+  }
+
+  ctx.restore();
+
+  // HUD
+  drawHUD();
+}
+
+function drawHUD() {
+  // Health bar
+  let barW = 200, barH = 16, barX = 20, barY = 20;
+  ctx.fillStyle = '#1118';
+  ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
+  ctx.fillStyle = '#222';
+  ctx.fillRect(barX, barY, barW, barH);
+  let hpPct = player.hp / player.maxHp;
+  let hpColor = hpPct > 0.5 ? '#0f0' : hpPct > 0.25 ? '#ff0' : '#f00';
+  ctx.fillStyle = hpColor;
+  ctx.shadowColor = hpColor;
+  ctx.shadowBlur = 8;
+  ctx.fillRect(barX, barY, barW * hpPct, barH);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#fff';
+  ctx.font = '12px Courier New';
+  ctx.fillText('HP', barX + barW + 8, barY + 13);
+
+  // Lives
+  ctx.fillStyle = '#0ff';
+  ctx.shadowColor = '#0ff';
+  ctx.shadowBlur = 6;
+  ctx.font = '16px Courier New';
+  ctx.fillText('LIVES: ' + lives, barX, barY + 38);
+  ctx.shadowBlur = 0;
+
+  // Score
+  ctx.fillStyle = '#ff0';
+  ctx.shadowColor = '#ff0';
+  ctx.shadowBlur = 6;
+  ctx.font = '20px Courier New';
+  ctx.textAlign = 'right';
+  ctx.fillText('SCORE: ' + score, W - 20, 34);
+  ctx.shadowBlur = 0;
+
+  // Wave
+  ctx.fillStyle = '#0f0';
+  ctx.shadowColor = '#0f0';
+  ctx.shadowBlur = 6;
+  ctx.font = '16px Courier New';
+  ctx.fillText('WAVE ' + wave, W - 20, 58);
+  ctx.shadowBlur = 0;
+  ctx.textAlign = 'left';
+
+  // Active powerup indicators
+  let puY = barY + 58;
+  if (shieldTimer > 0) {
+    ctx.fillStyle = '#48f';
+    ctx.shadowColor = '#48f';
+    ctx.shadowBlur = 6;
+    ctx.font = '14px Courier New';
+    ctx.fillText('SHIELD ' + Math.ceil(shieldTimer) + 's', barX, puY);
+    ctx.shadowBlur = 0;
+    puY += 18;
+  }
+  if (spreadTimer > 0) {
+    ctx.fillStyle = '#f0f';
+    ctx.shadowColor = '#f0f';
+    ctx.shadowBlur = 6;
+    ctx.font = '14px Courier New';
+    ctx.fillText('SPREAD ' + Math.ceil(spreadTimer) + 's', barX, puY);
+    ctx.shadowBlur = 0;
+  }
+}
+
+function gameOver() {
+  gameRunning = false;
+  gameOverActive = true;
+  document.getElementById('finalScore').textContent = 'Score: ' + score;
+  document.getElementById('finalWave').textContent = 'Wave Reached: ' + wave;
+  document.getElementById('nameInput').value = localStorage.getItem('sd_playerName') || '';
+  document.getElementById('gameOver').classList.add('active');
+  showLeaderboard();
+}
+
+function showLeaderboard() {
+  let lb = JSON.parse(localStorage.getItem('sd_leaderboard') || '[]');
+  let html = '<h2>TOP SCORES</h2>';
+  lb.sort((a,b) => b.score - a.score);
+  lb.slice(0, 5).forEach((e, i) => {
+    html += `<div class="lb-entry${i===0?' gold':''}">${i+1}. ${e.name} — ${e.score} (Wave ${e.wave})</div>`;
+  });
+  if (lb.length === 0) html += '<div class="lb-entry">No scores yet</div>';
+  document.getElementById('leaderboard').innerHTML = html;
+}
+
+document.getElementById('submitScore').addEventListener('click', () => {
+  let name = document.getElementById('nameInput').value.trim() || 'ACE';
+  localStorage.setItem('sd_playerName', name);
+  let lb = JSON.parse(localStorage.getItem('sd_leaderboard') || '[]');
+  lb.push({ name, score, wave });
+  lb.sort((a,b) => b.score - a.score);
+  if (lb.length > 5) lb.length = 5;
+  localStorage.setItem('sd_leaderboard', JSON.stringify(lb));
+  showLeaderboard();
+  document.getElementById('submitScore').disabled = true;
+  document.getElementById('submitScore').textContent = 'SAVED';
+});
+
+document.getElementById('restartBtn').addEventListener('click', () => {
+  document.getElementById('gameOver').classList.remove('active');
+  document.getElementById('submitScore').disabled = false;
+  document.getElementById('submitScore').textContent = 'SAVE SCORE';
+  document.getElementById('nameInput').value = localStorage.getItem('sd_playerName') || '';
+  gameOverActive = false;
+  initGame();
+  gameRunning = true;
+});
+
+document.getElementById('startBtn').addEventListener('click', () => {
+  document.getElementById('startScreen').classList.add('hidden');
+  initGame();
+  gameRunning = true;
+});
+
+function loop(time) {
+  let dt = Math.min((time - lastTime) / 1000, 0.05);
+  lastTime = time;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(t => { lastTime = t; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>
