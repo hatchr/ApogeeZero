@@ -104,7 +104,7 @@ document.addEventListener('pointerlockchange', () => {
 });
 
 // Game state
-let player, enemies, projectiles, particles, stars, planets, powerups;
+let player, enemies, projectiles, particles, stars, planets, powerups, allies;
 let score, wave, waveTimer, waveEnemiesLeft, enemiesAlive, lives;
 let gameRunning = false, gameOverActive = false;
 let lastTime = 0, plasmaCD = 0, missileCD = 0;
@@ -129,7 +129,7 @@ function makeStars() {
 
 function initGame() {
   player = { x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, hp: 100, maxHp: 100, radius: 16 };
-  enemies = []; projectiles = []; particles = []; powerups = [];
+  enemies = []; projectiles = []; particles = []; powerups = []; allies = [];
   score = 0; wave = 0; waveTimer = 2; waveEnemiesLeft = 0; enemiesAlive = 0;
   lives = 3; invincTimer = 0;
   plasmaCD = 0; missileCD = 0;
@@ -200,6 +200,24 @@ function nextWave() {
   waveEnemiesLeft = count;
   enemiesAlive = 0;
   waveTimer = 1.5;
+  // Occasionally spawn an ally (30% chance starting wave 2, max 2 alive)
+  if (wave >= 2 && Math.random() < 0.3 && allies.length < 2) {
+    spawnAlly();
+  }
+}
+
+function spawnAlly() {
+  let angle = Math.random() * Math.PI * 2;
+  let dist = Math.max(W, H) * 0.5 + 50;
+  let sx = player.x + Math.cos(angle) * dist;
+  let sy = player.y + Math.sin(angle) * dist;
+  allies.push({
+    x: sx, y: sy, vx: 0, vy: 0, angle: 0,
+    hp: 60, maxHp: 60, radius: 14, speed: 180,
+    shootCD: Math.random() * 1.5 + 0.5,
+    preferDist: 200 + Math.random() * 80,
+    orbitDir: Math.random() < 0.5 ? 1 : -1
+  });
 }
 
 function spawnEnemy() {
@@ -305,6 +323,7 @@ function update(dt) {
   }
   applyGravity(player);
   for (let e of enemies) applyGravity(e);
+  for (let a of allies) applyGravity(a);
   for (let p of projectiles) applyGravity(p);
 
   // Planet collisions
@@ -354,6 +373,27 @@ function update(dt) {
             screenShake(0.1);
             enemies.splice(enemies.indexOf(e), 1);
             enemiesAlive--;
+          }
+        }
+      }
+    }
+    // Allies
+    for (let a of allies) {
+      let adx = a.x - pl.x, ady = a.y - pl.y;
+      let adist = Math.sqrt(adx*adx + ady*ady);
+      if (adist < pl.radius + a.radius) {
+        let nx = adx/adist, ny = ady/adist;
+        a.x = pl.x + nx * (pl.radius + a.radius);
+        a.y = pl.y + ny * (pl.radius + a.radius);
+        let impactSpeed = Math.abs(a.vx * nx + a.vy * ny);
+        a.vx = nx * impactSpeed * 0.5;
+        a.vy = ny * impactSpeed * 0.5;
+        if (impactSpeed > 15) {
+          a.hp -= Math.max(3, Math.floor(impactSpeed * 0.15));
+          spawnParticles(a.x, a.y, pl.glow, 4, 60);
+          if (a.hp <= 0) {
+            spawnParticles(a.x, a.y, '#0ff', 20, 200);
+            allies.splice(allies.indexOf(a), 1);
           }
         }
       }
@@ -475,11 +515,20 @@ function update(dt) {
       particles.push({ x: ex, y: ey, vx: Math.cos(a)*s + e.vx*0.3, vy: Math.sin(a)*s + e.vy*0.3, life: 0.2+Math.random()*0.15, maxLife: 0.35, color: e.color, size: 1.5+Math.random()*1.5 });
     }
 
-    // Shooting
+    // Shooting — sometimes target a nearby ally instead
     e.shootCD -= dt;
-    if (e.shootCD <= 0 && dist < 800) {
+    let shootTarget = { x: player.x, y: player.y, vx: player.vx, vy: player.vy };
+    for (let a of allies) {
+      let adx = a.x - e.x, ady = a.y - e.y;
+      let adist = Math.sqrt(adx*adx + ady*ady);
+      if (adist < dist && Math.random() < 0.5) {
+        shootTarget = a;
+      }
+    }
+    let sDist = Math.sqrt((shootTarget.x-e.x)**2 + (shootTarget.y-e.y)**2);
+    if (e.shootCD <= 0 && sDist < 800) {
       let bSpeed = e.type === 'bruiser' ? 200 : 350;
-      let shotAngle = leadShot(e.x, e.y, e.vx, e.vy, player.x, player.y, player.vx, player.vy, bSpeed);
+      let shotAngle = leadShot(e.x, e.y, e.vx, e.vy, shootTarget.x, shootTarget.y, shootTarget.vx, shootTarget.vy, bSpeed);
       let fx = e.x + Math.cos(shotAngle)*20;
       let fy = e.y + Math.sin(shotAngle)*20;
       if (e.type === 'bruiser') {
@@ -489,6 +538,68 @@ function update(dt) {
         fireProjectile('enemy', fx, fy, shotAngle, 'enemyPlasma');
         e.shootCD = e.type === 'drone' ? 1.2 + Math.random()*0.5 : 0.7 + Math.random()*0.4;
       }
+    }
+  }
+
+  // Ally AI — target nearest enemy, orbit and shoot
+  for (let a of allies) {
+    // Find nearest enemy
+    let target = null, tDist = Infinity;
+    for (let e of enemies) {
+      let dx = e.x - a.x, dy = e.y - a.y;
+      let d = Math.sqrt(dx*dx + dy*dy);
+      if (d < tDist) { tDist = d; target = e; }
+    }
+    if (target) {
+      let dx = target.x - a.x, dy = target.y - a.y;
+      let targetAngle = Math.atan2(dy, dx);
+      a.angle = targetAngle;
+
+      let radialForce = 0;
+      if (tDist > a.preferDist + 40) radialForce = 1;
+      else if (tDist < a.preferDist - 40) radialForce = -1.2;
+      else radialForce = (tDist - a.preferDist) * 0.01;
+
+      let perp = targetAngle + Math.PI/2 * a.orbitDir;
+      let accel = a.speed * dt * 1.5;
+      a.vx += Math.cos(targetAngle) * radialForce * accel;
+      a.vy += Math.sin(targetAngle) * radialForce * accel;
+      a.vx += Math.cos(perp) * 1.0 * accel;
+      a.vy += Math.sin(perp) * 1.0 * accel;
+
+      // Shooting
+      a.shootCD -= dt;
+      if (a.shootCD <= 0 && tDist < 600) {
+        let shotAngle = leadShot(a.x, a.y, a.vx, a.vy, target.x, target.y, target.vx, target.vy, 350);
+        let fx = a.x + Math.cos(shotAngle)*18;
+        let fy = a.y + Math.sin(shotAngle)*18;
+        fireProjectile('ally', fx, fy, shotAngle, 'plasma');
+        a.shootCD = 0.8 + Math.random() * 0.4;
+      }
+    } else {
+      // No enemies — drift near player
+      let dx = player.x - a.x, dy = player.y - a.y;
+      a.angle = Math.atan2(dy, dx);
+      let d = Math.sqrt(dx*dx + dy*dy);
+      if (d > 150) {
+        a.vx += (dx/d) * a.speed * dt;
+        a.vy += (dy/d) * a.speed * dt;
+      }
+    }
+
+    let aspd = Math.sqrt(a.vx*a.vx + a.vy*a.vy);
+    if (aspd > a.speed) { a.vx *= a.speed/aspd; a.vy *= a.speed/aspd; }
+    a.vx *= Math.pow(0.97, dt*60); a.vy *= Math.pow(0.97, dt*60);
+    a.x += a.vx * dt; a.y += a.vy * dt;
+
+    // Exhaust trail
+    if (aspd > 30) {
+      let ex = a.x - Math.cos(a.angle) * a.radius;
+      let ey = a.y - Math.sin(a.angle) * a.radius;
+      let spread = (Math.random() - 0.5) * 0.6;
+      let ang = a.angle + Math.PI + spread;
+      let s = 40 + Math.random() * 40;
+      particles.push({ x: ex, y: ey, vx: Math.cos(ang)*s + a.vx*0.3, vy: Math.sin(ang)*s + a.vy*0.3, life: 0.2+Math.random()*0.15, maxLife: 0.35, color: '#0af', size: 1.5+Math.random()*1.5 });
     }
   }
 
@@ -503,21 +614,22 @@ function update(dt) {
     }
     if (p.life <= 0) { projectiles.splice(i, 1); continue; }
 
-    // Collision with enemies (player projectiles)
-    if (p.owner === 'player') {
+    let hit = false;
+
+    // Player & ally projectiles hit enemies
+    if (p.owner === 'player' || p.owner === 'ally') {
       for (let j = enemies.length - 1; j >= 0; j--) {
         let e = enemies[j];
         let ddx = p.x - e.x, ddy = p.y - e.y;
         if (ddx*ddx + ddy*ddy < (p.radius + e.radius) * (p.radius + e.radius)) {
           e.hp -= p.dmg;
           spawnParticles(p.x, p.y, e.color, 5, 100);
-          projectiles.splice(i, 1);
+          projectiles.splice(i, 1); hit = true;
           if (e.hp <= 0) {
-            score += e.score;
+            if (p.owner === 'player') score += e.score;
             spawnParticles(e.x, e.y, e.color, 20, 200);
             spawnParticles(e.x, e.y, '#ff0', 10, 150);
             screenShake(0.15);
-            // Chance to drop powerup
             if (Math.random() < 0.2) {
               let types = ['health', 'shield', 'spread'];
               let t = types[Math.floor(Math.random() * types.length)];
@@ -530,8 +642,29 @@ function update(dt) {
         }
       }
     }
-    // Collision with player (enemy projectiles)
-    if (p.owner === 'enemy' && invincTimer <= 0) {
+    if (hit) continue;
+
+    // Player projectiles can friendly-fire allies
+    if (p.owner === 'player') {
+      for (let j = allies.length - 1; j >= 0; j--) {
+        let a = allies[j];
+        let ddx = p.x - a.x, ddy = p.y - a.y;
+        if (ddx*ddx + ddy*ddy < (p.radius + a.radius) * (p.radius + a.radius)) {
+          a.hp -= p.dmg;
+          spawnParticles(p.x, p.y, '#0af', 5, 80);
+          projectiles.splice(i, 1); hit = true;
+          if (a.hp <= 0) {
+            spawnParticles(a.x, a.y, '#0ff', 20, 200);
+            allies.splice(j, 1);
+          }
+          break;
+        }
+      }
+    }
+    if (hit) continue;
+
+    // Enemy & ally projectiles hit player (friendly fire from allies too)
+    if ((p.owner === 'enemy' || p.owner === 'ally') && invincTimer <= 0) {
       let ddx = p.x - player.x, ddy = p.y - player.y;
       if (ddx*ddx + ddy*ddy < (p.radius + player.radius) * (p.radius + player.radius)) {
         if (shieldTimer > 0) {
@@ -542,7 +675,7 @@ function update(dt) {
         player.hp -= p.dmg;
         spawnParticles(p.x, p.y, '#0ff', 8, 120);
         screenShake(0.1);
-        projectiles.splice(i, 1);
+        projectiles.splice(i, 1); hit = true;
         if (player.hp <= 0) {
           lives--;
           spawnParticles(player.x, player.y, '#0ff', 30, 250);
@@ -555,6 +688,25 @@ function update(dt) {
             player.vx = 0; player.vy = 0;
             invincTimer = 2.5;
           }
+        }
+      }
+    }
+    if (hit) continue;
+
+    // Enemy projectiles hit allies
+    if (p.owner === 'enemy') {
+      for (let j = allies.length - 1; j >= 0; j--) {
+        let a = allies[j];
+        let ddx = p.x - a.x, ddy = p.y - a.y;
+        if (ddx*ddx + ddy*ddy < (p.radius + a.radius) * (p.radius + a.radius)) {
+          a.hp -= p.dmg;
+          spawnParticles(p.x, p.y, '#0af', 5, 80);
+          projectiles.splice(i, 1); hit = true;
+          if (a.hp <= 0) {
+            spawnParticles(a.x, a.y, '#0ff', 20, 200);
+            allies.splice(j, 1);
+          }
+          break;
         }
       }
     }
@@ -580,6 +732,66 @@ function update(dt) {
       let pushA = Math.atan2(ddy, ddx);
       e.vx += Math.cos(pushA) * 200;
       e.vy += Math.sin(pushA) * 200;
+    }
+  }
+
+  // Ally-player collision
+  for (let a of allies) {
+    let ddx = a.x - player.x, ddy = a.y - player.y;
+    let dist = Math.sqrt(ddx*ddx + ddy*ddy);
+    if (dist < a.radius + player.radius) {
+      // Push apart
+      let nx = ddx/dist, ny = ddy/dist;
+      a.x = player.x + nx * (a.radius + player.radius);
+      a.y = player.y + ny * (a.radius + player.radius);
+      let impactSpeed = Math.abs((player.vx - a.vx) * nx + (player.vy - a.vy) * ny);
+      // Bounce
+      a.vx += nx * impactSpeed * 0.5;
+      a.vy += ny * impactSpeed * 0.5;
+      player.vx -= nx * impactSpeed * 0.3;
+      player.vy -= ny * impactSpeed * 0.3;
+      if (impactSpeed > 30) {
+        let dmg = Math.max(2, Math.floor(impactSpeed * 0.08));
+        a.hp -= dmg;
+        if (invincTimer <= 0 && shieldTimer <= 0) player.hp -= dmg;
+        spawnParticles(a.x, a.y, '#0c6', 4, 60);
+        if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); allies.splice(allies.indexOf(a), 1); }
+        if (player.hp <= 0) {
+          lives--;
+          spawnParticles(player.x, player.y, '#0ff', 30, 250);
+          screenShake(0.3);
+          if (lives <= 0) { gameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; }
+        }
+      }
+    }
+  }
+
+  // Ally-enemy collision
+  for (let a of allies) {
+    for (let e of enemies) {
+      let ddx = a.x - e.x, ddy = a.y - e.y;
+      let dist = Math.sqrt(ddx*ddx + ddy*ddy);
+      if (dist < a.radius + e.radius) {
+        let nx = ddx/dist, ny = ddy/dist;
+        a.x = e.x + nx * (a.radius + e.radius);
+        a.y = e.y + ny * (a.radius + e.radius);
+        let impactSpeed = Math.abs((e.vx - a.vx) * nx + (e.vy - a.vy) * ny);
+        a.vx += nx * impactSpeed * 0.5;
+        a.vy += ny * impactSpeed * 0.5;
+        e.vx -= nx * impactSpeed * 0.5;
+        e.vy -= ny * impactSpeed * 0.5;
+        a.hp -= 10;
+        e.hp -= 10;
+        spawnParticles((a.x+e.x)/2, (a.y+e.y)/2, '#ff0', 6, 80);
+        if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); allies.splice(allies.indexOf(a), 1); break; }
+        if (e.hp <= 0) {
+          score += e.score;
+          spawnParticles(e.x, e.y, e.color, 20, 200);
+          screenShake(0.1);
+          enemies.splice(enemies.indexOf(e), 1);
+          enemiesAlive--;
+        }
+      }
     }
   }
 
@@ -624,7 +836,7 @@ function update(dt) {
   } else { shakeX = 0; shakeY = 0; }
 }
 
-function drawShip(x, y, angle, color, accent, radius, hp, maxHp, isPlayer) {
+function drawShip(x, y, angle, color, accent, radius, hp, maxHp, isPlayer, showHpBar) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
@@ -726,8 +938,8 @@ function drawShip(x, y, angle, color, accent, radius, hp, maxHp, isPlayer) {
   ctx.shadowBlur = 0;
   ctx.restore();
 
-  // HP bar (enemies only)
-  if (!isPlayer && hp < maxHp) {
+  // HP bar (non-player ships)
+  if (showHpBar && hp < maxHp) {
     let bw = radius * 2;
     let bx = x - bw/2, by = y - radius - 10;
     ctx.fillStyle = '#333';
@@ -844,14 +1056,19 @@ function draw() {
 
   // Enemies
   for (let e of enemies) {
-    drawShip(e.x, e.y, e.angle, e.color, e.accent, e.radius, e.hp, e.maxHp, false);
+    drawShip(e.x, e.y, e.angle, e.color, e.accent, e.radius, e.hp, e.maxHp, false, true);
+  }
+
+  // Allies — same ship style as player, green tint
+  for (let a of allies) {
+    drawShip(a.x, a.y, a.angle, '#0c6', '#4f8', a.radius, a.hp, a.maxHp, true, true);
   }
 
   // Player
   if (invincTimer > 0 && Math.floor(invincTimer * 10) % 2 === 0) {
     // Blink
   } else {
-    drawShip(player.x, player.y, player.angle, '#0cf', '#4ef', player.radius, player.hp, player.maxHp, true);
+    drawShip(player.x, player.y, player.angle, '#0cf', '#4ef', player.radius, player.hp, player.maxHp, true, false);
   }
 
   // Shield effect around player
