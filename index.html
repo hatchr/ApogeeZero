@@ -1217,6 +1217,94 @@ function drawHUD() {
     ctx.fillText('SPREAD ' + Math.ceil(spreadTimer) + 's', barX, puY);
     ctx.shadowBlur = 0;
   }
+
+  // Radar
+  let radarR = 80;
+  let radarX = W - radarR - 20;
+  let radarY = H - radarR - 20;
+  let radarRange = 3000; // world units visible on radar
+
+  // Background
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(radarX, radarY, radarR, 0, Math.PI * 2);
+  ctx.clip();
+  ctx.fillStyle = 'rgba(0,4,12,0.7)';
+  ctx.fill();
+
+  // Range rings
+  ctx.strokeStyle = 'rgba(0,255,255,0.08)';
+  ctx.lineWidth = 1;
+  for (let r = 1; r <= 3; r++) {
+    ctx.beginPath();
+    ctx.arc(radarX, radarY, radarR * r / 3, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+
+  // Crosshair lines
+  ctx.strokeStyle = 'rgba(0,255,255,0.06)';
+  ctx.beginPath();
+  ctx.moveTo(radarX - radarR, radarY);
+  ctx.lineTo(radarX + radarR, radarY);
+  ctx.moveTo(radarX, radarY - radarR);
+  ctx.lineTo(radarX, radarY + radarR);
+  ctx.stroke();
+
+  // Helper to plot a blip
+  function blip(wx, wy, color, size) {
+    let dx = (wx - player.x) / radarRange * radarR;
+    let dy = (wy - player.y) / radarRange * radarR;
+    let dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist > radarR - 2) {
+      // Clamp to edge
+      dx = dx / dist * (radarR - 2);
+      dy = dy / dist * (radarR - 2);
+    }
+    ctx.fillStyle = color;
+    ctx.fillRect(radarX + dx - size / 2, radarY + dy - size / 2, size, size);
+  }
+
+  // Planets
+  for (let pl of planets) {
+    let dx = (pl.x - player.x) / radarRange * radarR;
+    let dy = (pl.y - player.y) / radarRange * radarR;
+    let pr = Math.max(2, pl.radius / radarRange * radarR);
+    ctx.fillStyle = 'rgba(255,255,255,0.1)';
+    ctx.beginPath();
+    ctx.arc(radarX + dx, radarY + dy, pr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Enemies
+  for (let e of enemies) blip(e.x, e.y, e.color, 3);
+  // Allies
+  for (let a of allies) blip(a.x, a.y, '#0c6', 3);
+  // Powerups
+  for (let pu of powerups) {
+    let col = pu.type === 'health' ? '#0f0' : pu.type === 'shield' ? '#48f' : '#f0f';
+    blip(pu.x, pu.y, col, 2);
+  }
+
+  // Player (center dot)
+  ctx.fillStyle = '#0ff';
+  ctx.fillRect(radarX - 1.5, radarY - 1.5, 3, 3);
+
+  // Player facing line
+  ctx.strokeStyle = '#0ff';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(radarX, radarY);
+  ctx.lineTo(radarX + Math.cos(player.angle) * 10, radarY + Math.sin(player.angle) * 10);
+  ctx.stroke();
+
+  ctx.restore();
+
+  // Border ring (outside clip)
+  ctx.strokeStyle = 'rgba(0,255,255,0.3)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(radarX, radarY, radarR, 0, Math.PI * 2);
+  ctx.stroke();
 }
 
 function gameOver() {
