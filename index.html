@@ -269,6 +269,49 @@ function spawnParticles(x, y, color, count, speed) {
   }
 }
 
+function damagePlayer(amount) {
+  if (invincTimer > 0 || shieldTimer > 0) return;
+  player.hp -= amount;
+  screenShake(0.1);
+  if (player.hp <= 0) {
+    lives--;
+    spawnParticles(player.x, player.y, '#0ff', 30, 250);
+    spawnParticles(player.x, player.y, '#fff', 15, 200);
+    screenShake(0.3);
+    if (lives <= 0) { gameOver(); }
+    else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; }
+  }
+}
+
+function handlePlanetCollision(obj, pl) {
+  let dx = obj.x - pl.x, dy = obj.y - pl.y;
+  let dist = Math.sqrt(dx*dx + dy*dy);
+  if (dist < pl.radius + obj.radius) {
+    let nx = dx/dist, ny = dy/dist;
+    obj.x = pl.x + nx * (pl.radius + obj.radius);
+    obj.y = pl.y + ny * (pl.radius + obj.radius);
+    let impactSpeed = Math.abs(obj.vx * nx + obj.vy * ny);
+    obj.vx = nx * impactSpeed * 0.5;
+    obj.vy = ny * impactSpeed * 0.5;
+    if (impactSpeed > 15) {
+      let dmg = Math.max(3, Math.floor(impactSpeed * 0.15));
+      obj.hp -= dmg;
+      spawnParticles(obj.x, obj.y, pl.glow, obj === player ? 6 : 4, obj === player ? 80 : 60);
+      if (obj.hp <= 0) return true;
+    }
+  }
+  return false;
+}
+
+function spawnExhaust(obj, color) {
+  let ex = obj.x - Math.cos(obj.angle) * obj.radius;
+  let ey = obj.y - Math.sin(obj.angle) * obj.radius;
+  let spread = (Math.random() - 0.5) * 0.6;
+  let a = obj.angle + Math.PI + spread;
+  let s = 40 + Math.random() * 40;
+  particles.push({ x: ex, y: ey, vx: Math.cos(a)*s + obj.vx*0.3, vy: Math.sin(a)*s + obj.vy*0.3, life: 0.2+Math.random()*0.15, maxLife: 0.35, color: color, size: 1.5+Math.random()*1.5 });
+}
+
 function fireProjectile(owner, x, y, angle, type) {
   let p = { x, y, angle, owner, type };
   if (type === 'plasma') {
@@ -302,14 +345,8 @@ function leadShot(ex, ey, evx, evy, tx, ty, tvx, tvy, bulletSpeed) {
   return Math.atan2(dy + dvy*t, dx + dvx*t);
 }
 
-function update(dt) {
-  if (!gameRunning) return;
-
-  // Invincibility
-  if (invincTimer > 0) invincTimer -= dt;
-
+function updatePhysics(dt) {
   // Gravity from planets — apply to player, enemies, projectiles
-  // G scales with planet radius: avg radius ~55, avg G = 300
   function applyGravity(obj) {
     for (let pl of planets) {
       let dx = pl.x - obj.x, dy = pl.y - obj.y;
@@ -332,76 +369,40 @@ function update(dt) {
 
   // Planet collisions
   for (let pl of planets) {
-    // Player
-    let dx = player.x - pl.x, dy = player.y - pl.y;
-    let dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist < pl.radius + player.radius) {
-      // Push out
-      let nx = dx/dist, ny = dy/dist;
-      player.x = pl.x + nx * (pl.radius + player.radius);
-      player.y = pl.y + ny * (pl.radius + player.radius);
-      // Bounce + damage based on impact speed
-      let impactSpeed = Math.abs(player.vx * nx + player.vy * ny);
-      player.vx = nx * impactSpeed * 0.5;
-      player.vy = ny * impactSpeed * 0.5;
-      if (impactSpeed > 15 && invincTimer <= 0) {
-        let dmg = Math.max(3, Math.floor(impactSpeed * 0.15));
-        player.hp -= dmg;
-        screenShake(0.1);
-        spawnParticles(player.x, player.y, pl.glow, 6, 80);
-        if (player.hp <= 0) {
-          lives--;
-          spawnParticles(player.x, player.y, '#0ff', 30, 250);
-          screenShake(0.3);
-          if (lives <= 0) { gameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; }
-        }
-      }
+    // Player — save hp to detect damage, restore if invincible
+    let hpBefore = player.hp;
+    let playerDied = handlePlanetCollision(player, pl);
+    if (invincTimer > 0 || shieldTimer > 0) {
+      player.hp = hpBefore; // undo damage if protected
+    } else if (playerDied) {
+      lives--;
+      spawnParticles(player.x, player.y, '#0ff', 30, 250);
+      spawnParticles(player.x, player.y, '#fff', 15, 200);
+      screenShake(0.3);
+      if (lives <= 0) { gameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; }
     }
+
     // Enemies
-    for (let e of enemies) {
-      let edx = e.x - pl.x, edy = e.y - pl.y;
-      let edist = Math.sqrt(edx*edx + edy*edy);
-      if (edist < pl.radius + e.radius) {
-        let nx = edx/edist, ny = edy/edist;
-        e.x = pl.x + nx * (pl.radius + e.radius);
-        e.y = pl.y + ny * (pl.radius + e.radius);
-        let impactSpeed = Math.abs(e.vx * nx + e.vy * ny);
-        e.vx = nx * impactSpeed * 0.5;
-        e.vy = ny * impactSpeed * 0.5;
-        if (impactSpeed > 15) {
-          e.hp -= Math.max(3, Math.floor(impactSpeed * 0.15));
-          spawnParticles(e.x, e.y, pl.glow, 4, 60);
-          if (e.hp <= 0) {
-            score += e.score;
-            spawnParticles(e.x, e.y, e.color, 20, 200);
-            screenShake(0.1);
-            enemies.splice(enemies.indexOf(e), 1);
-            enemiesAlive--;
-          }
-        }
+    for (let i = enemies.length - 1; i >= 0; i--) {
+      let e = enemies[i];
+      if (handlePlanetCollision(e, pl)) {
+        score += e.score;
+        spawnParticles(e.x, e.y, e.color, 20, 200);
+        screenShake(0.1);
+        enemies.splice(i, 1);
+        enemiesAlive--;
       }
     }
+
     // Allies
-    for (let a of allies) {
-      let adx = a.x - pl.x, ady = a.y - pl.y;
-      let adist = Math.sqrt(adx*adx + ady*ady);
-      if (adist < pl.radius + a.radius) {
-        let nx = adx/adist, ny = ady/adist;
-        a.x = pl.x + nx * (pl.radius + a.radius);
-        a.y = pl.y + ny * (pl.radius + a.radius);
-        let impactSpeed = Math.abs(a.vx * nx + a.vy * ny);
-        a.vx = nx * impactSpeed * 0.5;
-        a.vy = ny * impactSpeed * 0.5;
-        if (impactSpeed > 15) {
-          a.hp -= Math.max(3, Math.floor(impactSpeed * 0.15));
-          spawnParticles(a.x, a.y, pl.glow, 4, 60);
-          if (a.hp <= 0) {
-            spawnParticles(a.x, a.y, '#0ff', 20, 200);
-            allies.splice(allies.indexOf(a), 1);
-          }
-        }
+    for (let i = allies.length - 1; i >= 0; i--) {
+      let a = allies[i];
+      if (handlePlanetCollision(a, pl)) {
+        spawnParticles(a.x, a.y, '#0ff', 20, 200);
+        allies.splice(i, 1);
       }
     }
+
     // Projectiles — destroy on planet hit
     for (let i = projectiles.length - 1; i >= 0; i--) {
       let p = projectiles[i];
@@ -412,7 +413,9 @@ function update(dt) {
       }
     }
   }
+}
 
+function updatePlayer(dt) {
   // Player rotation — relative mouse movement, immediate response
   player.angle += mouseDX * 0.004;
   mouseDX = 0;
@@ -429,7 +432,7 @@ function update(dt) {
   player.vx *= damp; player.vy *= damp;
   player.x += player.vx * dt; player.y += player.vy * dt;
 
-  // Engine particles
+  // Engine particles (player-specific: 2 particles with different timing/size)
   if (keys['w']) {
     let ex = player.x - Math.cos(player.angle)*18;
     let ey = player.y - Math.sin(player.angle)*18;
@@ -469,21 +472,9 @@ function update(dt) {
     missileEnergy -= missileCost;
     missileCD = 0.5;
   }
+}
 
-  // Wave spawning
-  if (waveEnemiesLeft > 0) {
-    waveTimer -= dt;
-    if (waveTimer <= 0) {
-      spawnEnemy();
-      waveEnemiesLeft--;
-      waveTimer = Math.max(0.3, 1.5 - wave * 0.05);
-    }
-  } else if (enemiesAlive <= 0) {
-    score += wave * 200;
-    nextWave();
-  }
-
-  // Enemy AI
+function updateEnemies(dt) {
   for (let e of enemies) {
     let dx = player.x - e.x, dy = player.y - e.y;
     let dist = Math.sqrt(dx*dx + dy*dy);
@@ -517,14 +508,9 @@ function update(dt) {
     e.vx *= Math.pow(0.97, dt*60); e.vy *= Math.pow(0.97, dt*60);
     e.x += e.vx * dt; e.y += e.vy * dt;
 
-    // Engine exhaust trail — emits from back of ship
+    // Engine exhaust trail
     if (espd > 30) {
-      let ex = e.x - Math.cos(e.angle) * e.radius;
-      let ey = e.y - Math.sin(e.angle) * e.radius;
-      let spread = (Math.random() - 0.5) * 0.6;
-      let a = e.angle + Math.PI + spread;
-      let s = 40 + Math.random() * 40;
-      particles.push({ x: ex, y: ey, vx: Math.cos(a)*s + e.vx*0.3, vy: Math.sin(a)*s + e.vy*0.3, life: 0.2+Math.random()*0.15, maxLife: 0.35, color: e.color, size: 1.5+Math.random()*1.5 });
+      spawnExhaust(e, e.color);
     }
 
     // Shooting — sometimes target a nearby ally instead
@@ -552,8 +538,9 @@ function update(dt) {
       }
     }
   }
+}
 
-  // Ally AI — target nearest enemy, orbit and shoot
+function updateAllies(dt) {
   for (let a of allies) {
     // Find nearest enemy
     let target = null, tDist = Infinity;
@@ -606,16 +593,12 @@ function update(dt) {
 
     // Exhaust trail
     if (aspd > 30) {
-      let ex = a.x - Math.cos(a.angle) * a.radius;
-      let ey = a.y - Math.sin(a.angle) * a.radius;
-      let spread = (Math.random() - 0.5) * 0.6;
-      let ang = a.angle + Math.PI + spread;
-      let s = 40 + Math.random() * 40;
-      particles.push({ x: ex, y: ey, vx: Math.cos(ang)*s + a.vx*0.3, vy: Math.sin(ang)*s + a.vy*0.3, life: 0.2+Math.random()*0.15, maxLife: 0.35, color: '#0af', size: 1.5+Math.random()*1.5 });
+      spawnExhaust(a, '#0af');
     }
   }
+}
 
-  // Projectiles
+function updateProjectiles(dt) {
   for (let i = projectiles.length - 1; i >= 0; i--) {
     let p = projectiles[i];
     p.x += p.vx * dt; p.y += p.vy * dt;
@@ -684,23 +667,9 @@ function update(dt) {
           projectiles.splice(i, 1);
           continue;
         }
-        player.hp -= p.dmg;
         spawnParticles(p.x, p.y, '#0ff', 8, 120);
-        screenShake(0.1);
         projectiles.splice(i, 1); hit = true;
-        if (player.hp <= 0) {
-          lives--;
-          spawnParticles(player.x, player.y, '#0ff', 30, 250);
-          spawnParticles(player.x, player.y, '#fff', 15, 200);
-          screenShake(0.3);
-          if (lives <= 0) {
-            gameOver();
-          } else {
-            player.hp = player.maxHp;
-            player.vx = 0; player.vy = 0;
-            invincTimer = 2.5;
-          }
-        }
+        damagePlayer(p.dmg);
       }
     }
     if (hit) continue;
@@ -723,22 +692,18 @@ function update(dt) {
       }
     }
   }
+}
 
+function updateCollisions(dt) {
   // Enemy-player collision
   for (let j = enemies.length - 1; j >= 0; j--) {
     let e = enemies[j];
     let ddx = e.x - player.x, ddy = e.y - player.y;
     if (ddx*ddx + ddy*ddy < (e.radius + player.radius) * (e.radius + player.radius)) {
       if (invincTimer <= 0 && shieldTimer <= 0) {
-        player.hp -= 15;
-        screenShake(0.15);
         spawnParticles(player.x, player.y, '#0ff', 8, 100);
-        if (player.hp <= 0) {
-          lives--;
-          spawnParticles(player.x, player.y, '#0ff', 30, 250);
-          screenShake(0.3);
-          if (lives <= 0) { gameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; }
-        }
+        screenShake(0.15);
+        damagePlayer(15);
       }
       // Push enemy away
       let pushA = Math.atan2(ddy, ddx);
@@ -771,6 +736,7 @@ function update(dt) {
         if (player.hp <= 0) {
           lives--;
           spawnParticles(player.x, player.y, '#0ff', 30, 250);
+          spawnParticles(player.x, player.y, '#fff', 15, 200);
           screenShake(0.3);
           if (lives <= 0) { gameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; }
         }
@@ -806,7 +772,9 @@ function update(dt) {
       }
     }
   }
+}
 
+function updatePowerups(dt) {
   // Powerup timers
   if (shieldTimer > 0) shieldTimer -= dt;
   if (spreadTimer > 0) spreadTimer -= dt;
@@ -831,14 +799,42 @@ function update(dt) {
       powerups.splice(i, 1);
     }
   }
+}
 
-  // Particles
+function updateParticles(dt) {
   for (let i = particles.length - 1; i >= 0; i--) {
     let p = particles[i];
     p.x += p.vx * dt; p.y += p.vy * dt;
     p.life -= dt;
     if (p.life <= 0) particles.splice(i, 1);
   }
+}
+
+function update(dt) {
+  if (!gameRunning) return;
+  if (invincTimer > 0) invincTimer -= dt;
+  updatePhysics(dt);
+  updatePlayer(dt);
+
+  // Wave spawning
+  if (waveEnemiesLeft > 0) {
+    waveTimer -= dt;
+    if (waveTimer <= 0) {
+      spawnEnemy();
+      waveEnemiesLeft--;
+      waveTimer = Math.max(0.3, 1.5 - wave * 0.05);
+    }
+  } else if (enemiesAlive <= 0) {
+    score += wave * 200;
+    nextWave();
+  }
+
+  updateEnemies(dt);
+  updateAllies(dt);
+  updateProjectiles(dt);
+  updateCollisions(dt);
+  updatePowerups(dt);
+  updateParticles(dt);
 
   // Camera
   camX = player.x; camY = player.y;
@@ -1104,62 +1100,44 @@ function draw() {
   drawHUD();
 }
 
-function drawHUD() {
-  // Health bar
-  let barW = 200, barH = 16, barX = 20, barY = 20;
+function drawBar(x, y, w, h, pct, color, label, labelColor) {
+  let pad = h > 10 ? 2 : 1;
   ctx.fillStyle = '#1118';
-  ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4);
+  ctx.fillRect(x - pad, y - pad, w + pad*2, h + pad*2);
   ctx.fillStyle = '#222';
-  ctx.fillRect(barX, barY, barW, barH);
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = color;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = h > 10 ? 8 : 6;
+  ctx.fillRect(x, y, w * pct, h);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = labelColor || color;
+  ctx.font = (h > 10 ? 12 : 10) + 'px Courier New';
+  ctx.fillText(label, x + w + 8, y + h - (h > 10 ? 3 : 0));
+}
+
+function drawHUD() {
+  let barW = 200, barX = 20, barY = 20;
+
+  // Health bar
   let hpPct = player.hp / player.maxHp;
   let hpColor = hpPct > 0.5 ? '#0f0' : hpPct > 0.25 ? '#ff0' : '#f00';
-  ctx.fillStyle = hpColor;
-  ctx.shadowColor = hpColor;
-  ctx.shadowBlur = 8;
-  ctx.fillRect(barX, barY, barW * hpPct, barH);
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#fff';
-  ctx.font = '12px Courier New';
-  ctx.fillText('HP', barX + barW + 8, barY + 13);
+  drawBar(barX, barY, barW, 16, hpPct, hpColor, 'HP', '#fff');
 
   // Plasma energy bar
-  let ammoBarW = 200, ammoBarH = 8, ammoBarX = barX, ammoBarY = barY + barH + 4;
-  ctx.fillStyle = '#1118';
-  ctx.fillRect(ammoBarX - 2, ammoBarY - 1, ammoBarW + 4, ammoBarH + 2);
-  ctx.fillStyle = '#222';
-  ctx.fillRect(ammoBarX, ammoBarY, ammoBarW, ammoBarH);
-  let plasmaPct = plasmaEnergy / plasmaMax;
-  ctx.fillStyle = '#0ff';
-  ctx.shadowColor = '#0ff';
-  ctx.shadowBlur = 6;
-  ctx.fillRect(ammoBarX, ammoBarY, ammoBarW * plasmaPct, ammoBarH);
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#0ff';
-  ctx.font = '10px Courier New';
-  ctx.fillText('PLASMA', ammoBarX + ammoBarW + 8, ammoBarY + 8);
+  let ammoBarY = barY + 20;
+  drawBar(barX, ammoBarY, barW, 8, plasmaEnergy / plasmaMax, '#0ff', 'PLASMA');
 
   // Missile energy bar
-  let missBarY = ammoBarY + ammoBarH + 3;
-  ctx.fillStyle = '#1118';
-  ctx.fillRect(ammoBarX - 2, missBarY - 1, ammoBarW + 4, ammoBarH + 2);
-  ctx.fillStyle = '#222';
-  ctx.fillRect(ammoBarX, missBarY, ammoBarW, ammoBarH);
-  let missilePct = missileEnergy / missileMax;
-  ctx.fillStyle = '#0f0';
-  ctx.shadowColor = '#0f0';
-  ctx.shadowBlur = 6;
-  ctx.fillRect(ammoBarX, missBarY, ammoBarW * missilePct, ammoBarH);
-  ctx.shadowBlur = 0;
-  ctx.fillStyle = '#0f0';
-  ctx.font = '10px Courier New';
-  ctx.fillText('MISSILE', ammoBarX + ammoBarW + 8, missBarY + 8);
+  let missBarY = ammoBarY + 11;
+  drawBar(barX, missBarY, barW, 8, missileEnergy / missileMax, '#0f0', 'MISSILE');
 
   // Lives
   ctx.fillStyle = '#0ff';
   ctx.shadowColor = '#0ff';
   ctx.shadowBlur = 6;
   ctx.font = '16px Courier New';
-  ctx.fillText('LIVES: ' + lives, barX, missBarY + ammoBarH + 18);
+  ctx.fillText('LIVES: ' + lives, barX, missBarY + 8 + 18);
   ctx.shadowBlur = 0;
 
   // Score
@@ -1181,7 +1159,7 @@ function drawHUD() {
   ctx.textAlign = 'left';
 
   // Active powerup indicators
-  let puY = missBarY + ammoBarH + 36;
+  let puY = missBarY + 8 + 36;
   if (shieldTimer > 0) {
     ctx.fillStyle = '#48f';
     ctx.shadowColor = '#48f';
