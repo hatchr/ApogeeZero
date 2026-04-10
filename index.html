@@ -158,7 +158,7 @@ function makePlanets() {
   let asteroidCount = 2 + Math.floor(Math.random() * 2);
   for (let i = 0; i < asteroidCount; i++) {
     let r = 150 + Math.random() * 250;
-    let x, y, tooClose;
+    let x, y, tooClose, tries = 0;
     do {
       x = (Math.random() - 0.5) * 3000;
       y = (Math.random() - 0.5) * 3000;
@@ -167,7 +167,7 @@ function makePlanets() {
         let ddx = x - p.x, ddy = y - p.y;
         if (Math.sqrt(ddx*ddx + ddy*ddy) < r + p.radius + 150) tooClose = true;
       }
-    } while (tooClose);
+    } while (tooClose && ++tries < 200);
     let c = asteroidColors[i % asteroidColors.length];
     planets.push({ x, y, radius: r, mass: r * 80, color: c.base, accent: c.accent, glow: c.glow });
   }
@@ -182,7 +182,7 @@ function makePlanets() {
   let planetCount = 1 + Math.floor(Math.random() * 2);
   for (let i = 0; i < planetCount; i++) {
     let r = 1500 + Math.random() * 2500;
-    let x, y, tooClose;
+    let x, y, tooClose, tries = 0;
     do {
       x = (Math.random() - 0.5) * 12000;
       y = (Math.random() - 0.5) * 12000;
@@ -191,7 +191,7 @@ function makePlanets() {
         let ddx = x - p.x, ddy = y - p.y;
         if (Math.sqrt(ddx*ddx + ddy*ddy) < r + p.radius + 500) tooClose = true;
       }
-    } while (tooClose);
+    } while (tooClose && ++tries < 200);
     let c = planetColors[i % planetColors.length];
     planets.push({ x, y, radius: r, mass: r * 80, color: c.base, accent: c.accent, glow: c.glow });
   }
@@ -327,7 +327,7 @@ function fireProjectile(owner, x, y, angle, type) {
   let p = { x, y, angle, owner, type };
   if (type === 'plasma') {
     p.speed = 600; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
-    p.dmg = 10; p.radius = 3; p.life = 2; p.color = owner === 'player' ? '#0ff' : '#f88';
+    p.dmg = 10; p.radius = 3; p.life = 2; p.color = owner === 'enemy' ? '#f88' : owner === 'ally' ? '#4f8' : '#0ff';
   } else if (type === 'missile') {
     p.speed = 300; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
     p.dmg = 35; p.radius = 5; p.life = 3; p.color = owner === 'player' ? '#0f0' : '#f0f';
@@ -755,7 +755,8 @@ function updateCollisions(dt) {
   }
 
   // Ally-player collision
-  for (let a of allies) {
+  for (let i = allies.length - 1; i >= 0; i--) {
+    let a = allies[i];
     let ddx = a.x - player.x, ddy = a.y - player.y;
     let dist = Math.sqrt(ddx*ddx + ddy*ddy);
     if (dist < a.radius + player.radius) {
@@ -772,23 +773,19 @@ function updateCollisions(dt) {
       if (impactSpeed > 30) {
         let dmg = Math.max(2, Math.floor(impactSpeed * 0.08));
         a.hp -= dmg;
-        if (invincTimer <= 0 && shieldTimer <= 0) player.hp -= dmg;
         spawnParticles(a.x, a.y, '#0c6', 4, 60);
-        if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); allies.splice(allies.indexOf(a), 1); }
-        if (player.hp <= 0) {
-          lives--;
-          spawnParticles(player.x, player.y, '#0ff', 30, 250);
-          spawnParticles(player.x, player.y, '#fff', 15, 200);
-          screenShake(0.3);
-          if (lives <= 0) { gameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; }
-        }
+        if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); allies.splice(i, 1); }
+        damagePlayer(dmg);
       }
     }
   }
 
   // Ally-enemy collision
-  for (let a of allies) {
-    for (let e of enemies) {
+  for (let i = allies.length - 1; i >= 0; i--) {
+    let a = allies[i];
+    let allyDead = false;
+    for (let j = enemies.length - 1; j >= 0; j--) {
+      let e = enemies[j];
       let ddx = a.x - e.x, ddy = a.y - e.y;
       let dist = Math.sqrt(ddx*ddx + ddy*ddy);
       if (dist < a.radius + e.radius) {
@@ -803,14 +800,15 @@ function updateCollisions(dt) {
         a.hp -= 10;
         e.hp -= 10;
         spawnParticles((a.x+e.x)/2, (a.y+e.y)/2, '#ff0', 6, 80);
-        if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); allies.splice(allies.indexOf(a), 1); break; }
+        if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); allies.splice(i, 1); allyDead = true; }
         if (e.hp <= 0) {
           score += e.score;
           spawnParticles(e.x, e.y, e.color, 20, 200);
           screenShake(0.1);
-          enemies.splice(enemies.indexOf(e), 1);
+          enemies.splice(j, 1);
           enemiesAlive--;
         }
+        if (allyDead) break;
       }
     }
   }
