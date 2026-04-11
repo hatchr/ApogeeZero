@@ -1,4 +1,4 @@
-# Star Destroyer
+# Apogee Zero
 
 Single-file browser game (index.html). 2D top-down spaceship survival with endless waves.
 
