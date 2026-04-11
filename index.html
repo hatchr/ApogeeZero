@@ -362,18 +362,27 @@ function avoidPlanets(obj, dt) {
   for (let pl of planets) {
     let dx = obj.x - pl.x, dy = obj.y - pl.y;
     let dist = Math.sqrt(dx*dx + dy*dy);
-    let dangerZone = pl.radius + 200;
+    let dangerZone = pl.radius + Math.max(250, pl.radius * 0.3);
     if (dist < dangerZone) {
-      // Calculate how strong gravity is here to counter it
       let scaledG = 600 * (pl.radius / 275);
       let gravForce = scaledG * pl.mass / (dist * dist);
-      // Avoidance must exceed gravity, ramping up sharply near surface
       let urgency = (dangerZone - dist) / dangerZone;
       urgency = urgency * urgency;
       let avoidForce = (gravForce + obj.speed * 2) * urgency;
       let nx = dx / dist, ny = dy / dist;
+      // Push away from planet
       obj.vx += nx * avoidForce * dt;
       obj.vy += ny * avoidForce * dt;
+      // Tangential push so entities curve around instead of bouncing back.
+      // Use velocity dot normal to pick the tangent direction.
+      let dot = obj.vx * nx + obj.vy * ny;
+      if (dot < 0) { // heading toward planet
+        let cross = obj.vx * ny - obj.vy * nx;
+        let sign = cross >= 0 ? 1 : -1;
+        let tx = -ny * sign, ty = nx * sign;
+        obj.vx += tx * avoidForce * 0.6 * dt;
+        obj.vy += ty * avoidForce * 0.6 * dt;
+      }
       totalForce += avoidForce * urgency;
     }
   }
