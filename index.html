@@ -169,7 +169,8 @@ function makePlanets() {
       }
     } while (tooClose && ++tries < 200);
     let c = asteroidColors[i % asteroidColors.length];
-    planets.push({ x, y, radius: r, mass: r * 80, color: c.base, accent: c.accent, glow: c.glow });
+    let dz = r + Math.max(125, r * 0.25);
+    planets.push({ x, y, radius: r, mass: r * 80, gravParam: 600 * r / 275 * r * 80, dangerZone: dz, dangerMargin: dz - r, color: c.base, accent: c.accent, glow: c.glow });
   }
   // Planets — huge, colorful
   let planetColors = [
@@ -193,7 +194,8 @@ function makePlanets() {
       }
     } while (tooClose && ++tries < 200);
     let c = planetColors[i % planetColors.length];
-    planets.push({ x, y, radius: r, mass: r * 80, color: c.base, accent: c.accent, glow: c.glow });
+    let dz = r + Math.max(125, r * 0.25);
+    planets.push({ x, y, radius: r, mass: r * 80, gravParam: 600 * r / 275 * r * 80, dangerZone: dz, dangerMargin: dz - r, color: c.base, accent: c.accent, glow: c.glow });
   }
 }
 
@@ -234,7 +236,7 @@ function spawnAlly() {
     hp: 60, maxHp: 60, radius: 14, speed: 180,
     shootCD: Math.random() * 1.5 + 0.5,
     preferDist: 200 + Math.random() * 80,
-    orbitDir: Math.random() < 0.5 ? 1 : -1
+    orbitDir: Math.random() < 0.5 ? 1 : -1, orbitStrength: 1.0
   });
 }
 
@@ -257,15 +259,15 @@ function spawnEnemy() {
   if (type === 'drone') {
     e.hp = 20 + diff * 3; e.maxHp = e.hp; e.speed = 220 + diff * 5; e.color = '#f44'; e.accent = '#f88'; e.dmg = 8; e.score = 100; e.radius = 12;
     e.preferDist = 180 + Math.random() * 80;
-    e.orbitDir = Math.random() < 0.5 ? 1 : -1;
+    e.orbitDir = Math.random() < 0.5 ? 1 : -1; e.orbitStrength = 1.0;
   } else if (type === 'gunship') {
     e.hp = 50 + diff * 5; e.maxHp = e.hp; e.speed = 150 + diff * 3; e.color = '#f80'; e.accent = '#fc4'; e.dmg = 12; e.score = 250; e.radius = 16;
     e.preferDist = 280 + Math.random() * 120;
-    e.orbitDir = Math.random() < 0.5 ? 1 : -1;
+    e.orbitDir = Math.random() < 0.5 ? 1 : -1; e.orbitStrength = 1.2;
   } else if (type === 'bruiser') {
     e.hp = 120 + diff * 10; e.maxHp = e.hp; e.speed = 80 + diff * 2; e.color = '#a0f'; e.accent = '#c6f'; e.dmg = 25; e.score = 500; e.radius = 22;
     e.preferDist = 320 + Math.random() * 100;
-    e.orbitDir = Math.random() < 0.5 ? 1 : -1;
+    e.orbitDir = Math.random() < 0.5 ? 1 : -1; e.orbitStrength = 0.6;
   } else {
     // Kamikaze — fast, fragile, charges and explodes on contact
     e.hp = 15 + diff * 2; e.maxHp = e.hp; e.speed = 300 + diff * 8; e.color = '#cf0'; e.accent = '#ff0'; e.dmg = 30; e.score = 150; e.radius = 10;
@@ -370,64 +372,74 @@ function leadShot(ex, ey, evx, evy, tx, ty, tvx, tvy, bulletSpeed) {
   return Math.atan2(dy + dvy*t, dx + dvx*t);
 }
 
-// Returns the avoidance force applied (0 if none) so callers can boost speed cap
+// Returns nonzero when avoidance is strong enough to suppress attack steering
 function avoidPlanets(obj, dt, navTarget) {
   let totalForce = 0;
   for (let pl of planets) {
     let dx = obj.x - pl.x, dy = obj.y - pl.y;
-    let dist = Math.sqrt(dx*dx + dy*dy);
-    let dangerZone = pl.radius + Math.max(250, pl.radius * 0.5);
-    if (dist < dangerZone) {
-      let scaledG = 600 * (pl.radius / 275);
-      let gravForce = scaledG * pl.mass / (dist * dist);
-      let urgency = (dangerZone - dist) / (dangerZone - pl.radius);
-      urgency = urgency * urgency;
-      let avoidForce = gravForce + (gravForce + obj.speed * 2) * urgency;
-      let nx = dx / dist, ny = dy / dist;
-      // Push away from planet
-      obj.vx += nx * avoidForce * dt;
-      obj.vy += ny * avoidForce * dt;
-      // Tangential push — curve toward navTarget if provided, else follow velocity.
-      let sign;
-      if (navTarget) {
-        let tdx = navTarget.x - pl.x, tdy = navTarget.y - pl.y;
-        let cross = nx * tdy - ny * tdx;
-        sign = cross >= 0 ? 1 : -1;
-      } else {
-        let cross = obj.vx * ny - obj.vy * nx;
-        sign = cross >= 0 ? 1 : -1;
-      }
-      let tx = -ny * sign, ty = nx * sign;
-      obj.vx += tx * avoidForce * 0.6 * dt;
-      obj.vy += ty * avoidForce * 0.6 * dt;
-      if (urgency > 0.15) totalForce += avoidForce;
-    }
+    let distSq = dx*dx + dy*dy;
+    if (distSq >= pl.dangerZone * pl.dangerZone) continue;
+    let dist = Math.sqrt(distSq);
+    let gravForce = pl.gravParam / (dist * dist);
+    let urgency = (pl.dangerZone - dist) / pl.dangerMargin;
+    urgency = urgency * urgency;
+    let avoidForce = gravForce + (gravForce + obj.speed * 2) * urgency;
+    let nx = dx / dist, ny = dy / dist;
+    obj.vx += nx * avoidForce * dt;
+    obj.vy += ny * avoidForce * dt;
+    // Tangential push — curve toward navTarget if provided, else follow velocity
+    let cross = navTarget
+      ? nx * (navTarget.y - pl.y) - ny * (navTarget.x - pl.x)
+      : obj.vx * ny - obj.vy * nx;
+    let sign = cross >= 0 ? 1 : -1;
+    obj.vx += -ny * sign * avoidForce * 0.6 * dt;
+    obj.vy +=  nx * sign * avoidForce * 0.6 * dt;
+    if (urgency > 0.15) totalForce += avoidForce;
   }
   return totalForce;
 }
 
-function updatePhysics(dt) {
-  // Gravity from planets — apply to player, enemies, allies, and gravity-affected projectiles
-  function applyGravity(obj) {
-    for (let pl of planets) {
-      let dx = pl.x - obj.x, dy = pl.y - obj.y;
-      let distSq = dx*dx + dy*dy;
-      let dist = Math.sqrt(distSq);
-      let minDist = pl.radius + (obj.radius || 3);
-      if (dist < minDist) dist = minDist;
-      let scaledG = 600 * (pl.radius / 275);
-      let force = scaledG * pl.mass / (dist * dist);
-      let ax = (dx / dist) * force;
-      let ay = (dy / dist) * force;
-      obj.vx += ax * dt;
-      obj.vy += ay * dt;
-    }
+function applyGravity(obj, dt) {
+  for (let pl of planets) {
+    let dx = pl.x - obj.x, dy = pl.y - obj.y;
+    let distSq = dx*dx + dy*dy;
+    let dist = Math.sqrt(distSq);
+    let minDist = pl.radius + (obj.radius || 3);
+    if (dist < minDist) dist = minDist;
+    let force = pl.gravParam / (dist * dist);
+    obj.vx += (dx / dist) * force * dt;
+    obj.vy += (dy / dist) * force * dt;
   }
-  applyGravity(player);
-  for (let e of enemies) applyGravity(e);
-  for (let a of allies) applyGravity(a);
+}
+
+function steerOrbit(obj, tx, ty, dist, dt) {
+  let angle = Math.atan2(ty - obj.y, tx - obj.x);
+  let radialForce = 0;
+  if (dist > obj.preferDist + 40) radialForce = 1;
+  else if (dist < obj.preferDist - 40) radialForce = -1.2;
+  else radialForce = (dist - obj.preferDist) * 0.01;
+  let perp = angle + Math.PI / 2 * obj.orbitDir;
+  let accel = obj.speed * dt * 1.5;
+  obj.vx += Math.cos(angle) * radialForce * accel;
+  obj.vy += Math.sin(angle) * radialForce * accel;
+  obj.vx += Math.cos(perp) * obj.orbitStrength * accel;
+  obj.vy += Math.sin(perp) * obj.orbitStrength * accel;
+}
+
+function applyMovement(obj, avoiding, drag, dt) {
+  let spd = Math.sqrt(obj.vx * obj.vx + obj.vy * obj.vy);
+  if (!avoiding && spd > obj.speed) { obj.vx *= obj.speed / spd; obj.vy *= obj.speed / spd; }
+  obj.vx *= drag; obj.vy *= drag;
+  obj.x += obj.vx * dt; obj.y += obj.vy * dt;
+  return spd;
+}
+
+function updatePhysics(dt) {
+  applyGravity(player, dt);
+  for (let e of enemies) applyGravity(e, dt);
+  for (let a of allies) applyGravity(a, dt);
   for (let p of projectiles) {
-    if (p.affectedByGravity) applyGravity(p);
+    if (p.affectedByGravity) applyGravity(p, dt);
   }
 
   // Planet collisions
@@ -538,52 +550,24 @@ function updatePlayer(dt) {
 }
 
 function updateEnemies(dt) {
+  let drag = Math.pow(0.97, dt * 60);
   for (let e of enemies) {
     let dx = player.x - e.x, dy = player.y - e.y;
     let dist = Math.sqrt(dx*dx + dy*dy);
-    let targetAngle = Math.atan2(dy, dx);
-    e.angle = targetAngle;
+    e.angle = Math.atan2(dy, dx);
 
-    // Avoid planets — when escaping, skip attack steering entirely
     let avoiding = avoidPlanets(e, dt, player);
 
-    // Kamikaze — charge straight at the player, no orbit
     if (e.type === 'kamikaze') {
       let accel = e.speed * dt * 2.5;
-      e.vx += Math.cos(targetAngle) * accel;
-      e.vy += Math.sin(targetAngle) * accel;
+      e.vx += Math.cos(e.angle) * accel;
+      e.vy += Math.sin(e.angle) * accel;
     } else if (!avoiding) {
-    // Approach/retreat to maintain preferred distance
-    let radialForce = 0;
-    if (dist > e.preferDist + 40) {
-      radialForce = 1; // move toward player
-    } else if (dist < e.preferDist - 40) {
-      radialForce = -1.2; // back away
-    } else {
-      // Small nudge to stay centered in the band
-      radialForce = (dist - e.preferDist) * 0.01;
+      steerOrbit(e, player.x, player.y, dist, dt);
     }
 
-    // Orbit perpendicular to the player
-    let orbitStrength = e.type === 'drone' ? 1.0 : e.type === 'gunship' ? 1.2 : 0.6;
-    let perp = targetAngle + Math.PI/2 * e.orbitDir;
-
-    let accel = e.speed * dt * 1.5;
-    e.vx += Math.cos(targetAngle) * radialForce * accel;
-    e.vy += Math.sin(targetAngle) * radialForce * accel;
-    e.vx += Math.cos(perp) * orbitStrength * accel;
-    e.vy += Math.sin(perp) * orbitStrength * accel;
-    }
-
-    let espd = Math.sqrt(e.vx*e.vx + e.vy*e.vy);
-    if (!avoiding && espd > e.speed) { e.vx *= e.speed/espd; e.vy *= e.speed/espd; }
-    e.vx *= Math.pow(0.97, dt*60); e.vy *= Math.pow(0.97, dt*60);
-    e.x += e.vx * dt; e.y += e.vy * dt;
-
-    // Engine exhaust trail (throttled)
-    if (espd > 30 && Math.random() < 0.4) {
-      spawnExhaust(e, e.color);
-    }
+    let espd = applyMovement(e, avoiding, drag, dt);
+    if (espd > 30 && Math.random() < 0.4) spawnExhaust(e, e.color);
 
     // Kamikazes don't shoot
     if (e.type === 'kamikaze') continue;
@@ -615,6 +599,7 @@ function updateEnemies(dt) {
 }
 
 function updateAllies(dt) {
+  let drag = Math.pow(0.97, dt * 60);
   for (let a of allies) {
     // Find nearest enemy
     let target = null, tDist = Infinity;
@@ -623,26 +608,12 @@ function updateAllies(dt) {
       let d = Math.sqrt(dx*dx + dy*dy);
       if (d < tDist) { tDist = d; target = e; }
     }
-    // Avoid planets — when escaping, skip attack steering entirely
-    let aAvoiding = avoidPlanets(a, dt, target || player);
 
-    if (target && !aAvoiding) {
-      let dx = target.x - a.x, dy = target.y - a.y;
-      let targetAngle = Math.atan2(dy, dx);
-      a.angle = targetAngle;
+    let avoiding = avoidPlanets(a, dt, target || player);
 
-      let radialForce = 0;
-      if (tDist > a.preferDist + 40) radialForce = 1;
-      else if (tDist < a.preferDist - 40) radialForce = -1.2;
-      else radialForce = (tDist - a.preferDist) * 0.01;
-
-      let perp = targetAngle + Math.PI/2 * a.orbitDir;
-      let accel = a.speed * dt * 1.5;
-      a.vx += Math.cos(targetAngle) * radialForce * accel;
-      a.vy += Math.sin(targetAngle) * radialForce * accel;
-      a.vx += Math.cos(perp) * 1.0 * accel;
-      a.vy += Math.sin(perp) * 1.0 * accel;
-
+    if (target && !avoiding) {
+      a.angle = Math.atan2(target.y - a.y, target.x - a.x);
+      steerOrbit(a, target.x, target.y, tDist, dt);
       // Shooting
       a.shootCD -= dt;
       if (a.shootCD <= 0 && tDist < 600) {
@@ -652,7 +623,7 @@ function updateAllies(dt) {
         fireProjectile('ally', fx, fy, shotAngle, 'plasma');
         a.shootCD = 0.8 + Math.random() * 0.4;
       }
-    } else if (!aAvoiding) {
+    } else if (!avoiding) {
       // No enemies — drift near player
       let dx = player.x - a.x, dy = player.y - a.y;
       a.angle = Math.atan2(dy, dx);
@@ -662,15 +633,9 @@ function updateAllies(dt) {
         a.vy += (dy/d) * a.speed * dt;
       }
     }
-    let aspd = Math.sqrt(a.vx*a.vx + a.vy*a.vy);
-    if (!aAvoiding && aspd > a.speed) { a.vx *= a.speed/aspd; a.vy *= a.speed/aspd; }
-    a.vx *= Math.pow(0.97, dt*60); a.vy *= Math.pow(0.97, dt*60);
-    a.x += a.vx * dt; a.y += a.vy * dt;
 
-    // Exhaust trail (throttled)
-    if (aspd > 30 && Math.random() < 0.4) {
-      spawnExhaust(a, '#0af');
-    }
+    let aspd = applyMovement(a, avoiding, drag, dt);
+    if (aspd > 30 && Math.random() < 0.4) spawnExhaust(a, '#0af');
   }
 }
 
