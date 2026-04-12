@@ -949,7 +949,7 @@ function drawShip(x, y, angle, color, accent, radius, hp, maxHp, isPlayer, showH
 
   // Glow
   ctx.shadowColor = color;
-  ctx.shadowBlur = 15;
+  ctx.shadowBlur = 6;
 
   if (isPlayer) {
     // Player ship — sleek arrow
@@ -1057,7 +1057,6 @@ function drawShip(x, y, angle, color, accent, radius, hp, maxHp, isPlayer, showH
     }
     // Core dot
     ctx.fillStyle = accent;
-    ctx.shadowBlur = 10;
     ctx.beginPath();
     ctx.arc(0, 0, 2, 0, Math.PI*2);
     ctx.fill();
@@ -1163,7 +1162,7 @@ function draw() {
     // Fading when about to expire
     ctx.globalAlpha = pu.life < 3 ? 0.3 + 0.7 * (pu.life / 3) : 1;
     ctx.shadowColor = col;
-    ctx.shadowBlur = 15;
+    ctx.shadowBlur = 6;
     ctx.strokeStyle = col;
     ctx.lineWidth = 2;
     ctx.beginPath();
