@@ -328,15 +328,19 @@ function fireProjectile(owner, x, y, angle, type) {
   if (type === 'plasma') {
     p.speed = 600; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
     p.dmg = 10; p.radius = 3; p.life = 2; p.color = owner === 'enemy' ? '#f88' : owner === 'ally' ? '#4f8' : '#0ff';
+    p.affectedByGravity = false;
   } else if (type === 'missile') {
     p.speed = 300; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
     p.dmg = 35; p.radius = 5; p.life = 3; p.color = owner === 'player' ? '#0f0' : '#f0f';
+    p.affectedByGravity = true;
   } else if (type === 'enemyPlasma') {
     p.speed = 350; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
     p.dmg = 8; p.radius = 3; p.life = 2.5; p.color = '#f84';
+    p.affectedByGravity = false;
   } else if (type === 'enemyMissile') {
     p.speed = 200; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
     p.dmg = 25; p.radius = 5; p.life = 3; p.color = '#f0f';
+    p.affectedByGravity = true;
   }
   projectiles.push(p);
 }
@@ -390,7 +394,7 @@ function avoidPlanets(obj, dt) {
 }
 
 function updatePhysics(dt) {
-  // Gravity from planets — apply to player, enemies, projectiles
+  // Gravity from planets — apply to player, enemies, allies, and gravity-affected projectiles
   function applyGravity(obj) {
     for (let pl of planets) {
       let dx = pl.x - obj.x, dy = pl.y - obj.y;
@@ -409,7 +413,9 @@ function updatePhysics(dt) {
   applyGravity(player);
   for (let e of enemies) applyGravity(e);
   for (let a of allies) applyGravity(a);
-  for (let p of projectiles) applyGravity(p);
+  for (let p of projectiles) {
+    if (p.affectedByGravity) applyGravity(p);
+  }
 
   // Planet collisions
   for (let pl of planets) {
