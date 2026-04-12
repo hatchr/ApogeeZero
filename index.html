@@ -279,6 +279,9 @@ function spawnEnemy() {
 function screenShake(dur) { shakeDur = Math.max(shakeDur, dur); }
 
 function spawnParticles(x, y, color, count, speed) {
+  let room = 300 - particles.length;
+  if (room <= 0) return;
+  if (count > room) count = room;
   for (let i = 0; i < count; i++) {
     let a = Math.random() * Math.PI * 2;
     let s = Math.random() * speed;
@@ -321,6 +324,7 @@ function handlePlanetCollision(obj, pl) {
 }
 
 function spawnExhaust(obj, color) {
+  if (particles.length >= 300) return;
   let ex = obj.x - Math.cos(obj.angle) * obj.radius;
   let ey = obj.y - Math.sin(obj.angle) * obj.radius;
   let spread = (Math.random() - 0.5) * 0.6;
@@ -575,8 +579,8 @@ function updateEnemies(dt) {
     e.vx *= Math.pow(0.97, dt*60); e.vy *= Math.pow(0.97, dt*60);
     e.x += e.vx * dt; e.y += e.vy * dt;
 
-    // Engine exhaust trail
-    if (espd > 30) {
+    // Engine exhaust trail (throttled)
+    if (espd > 30 && Math.random() < 0.4) {
       spawnExhaust(e, e.color);
     }
 
@@ -663,8 +667,8 @@ function updateAllies(dt) {
     a.vx *= Math.pow(0.97, dt*60); a.vy *= Math.pow(0.97, dt*60);
     a.x += a.vx * dt; a.y += a.vy * dt;
 
-    // Exhaust trail
-    if (aspd > 30) {
+    // Exhaust trail (throttled)
+    if (aspd > 30 && Math.random() < 0.4) {
       spawnExhaust(a, '#0af');
     }
   }
@@ -1125,18 +1129,15 @@ function draw() {
     let alpha = Math.max(0, p.life / p.maxLife);
     ctx.globalAlpha = alpha;
     ctx.fillStyle = p.color;
-    ctx.shadowColor = p.color;
-    ctx.shadowBlur = 6;
     ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
   }
   ctx.globalAlpha = 1;
-  ctx.shadowBlur = 0;
 
   // Projectiles
   for (let p of projectiles) {
     ctx.fillStyle = p.color;
     ctx.shadowColor = p.color;
-    ctx.shadowBlur = 12;
+    ctx.shadowBlur = 4;
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
     ctx.fill();
