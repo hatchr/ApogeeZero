@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -262,8 +263,8 @@ function spawnEnemy() {
     e.orbitDir = Math.random() < 0.5 ? 1 : -1; e.orbitStrength = 1.0;
   } else if (type === 'gunship') {
     e.hp = 50 + diff * 5; e.maxHp = e.hp; e.speed = 150 + diff * 3; e.color = '#f80'; e.accent = '#fc4'; e.dmg = 12; e.score = 250; e.radius = 16;
-    e.preferDist = 280 + Math.random() * 120;
-    e.orbitDir = Math.random() < 0.5 ? 1 : -1; e.orbitStrength = 1.2;
+    e.attackState = 'charge'; e.closeDist = 150 + Math.random() * 50; e.farDist = 500 + Math.random() * 100;
+    e.strafeDir = Math.random() < 0.5 ? 1 : -1;
   } else if (type === 'bruiser') {
     e.hp = 120 + diff * 10; e.maxHp = e.hp; e.speed = 80 + diff * 2; e.color = '#a0f'; e.accent = '#c6f'; e.dmg = 25; e.score = 500; e.radius = 22;
     e.preferDist = 320 + Math.random() * 100;
@@ -562,6 +563,30 @@ function updateEnemies(dt) {
       let accel = e.speed * dt * 2.5;
       e.vx += Math.cos(e.angle) * accel;
       e.vy += Math.sin(e.angle) * accel;
+    } else if (e.type === 'gunship' && !avoiding) {
+      // Strafing run: charge in, curve past, fly out, loop back
+      let toPlayer = e.angle; // angle was set to face player above
+      let accel = e.speed * dt * 2.0;
+      if (e.attackState === 'charge') {
+        e.vx += Math.cos(toPlayer) * accel;
+        e.vy += Math.sin(toPlayer) * accel;
+        if (dist < e.closeDist) e.attackState = 'break';
+      } else if (e.attackState === 'break') {
+        // Hard perpendicular turn to sweep past
+        let perp = toPlayer + Math.PI / 2 * e.strafeDir;
+        e.vx += Math.cos(perp) * accel * 1.5;
+        e.vy += Math.sin(perp) * accel * 1.5;
+        e.angle = Math.atan2(e.vy, e.vx);
+        // Once heading away from player, extend out
+        if (dx * e.vx + dy * e.vy < 0) e.attackState = 'extend';
+      } else {
+        // Extend — fly forward, no steering toward player
+        let va = Math.atan2(e.vy, e.vx);
+        e.angle = va;
+        e.vx += Math.cos(va) * accel * 0.5;
+        e.vy += Math.sin(va) * accel * 0.5;
+        if (dist > e.farDist) { e.attackState = 'charge'; e.strafeDir *= -1; }
+      }
     } else if (!avoiding) {
       steerOrbit(e, player.x, player.y, dist, dt);
     }
@@ -569,8 +594,9 @@ function updateEnemies(dt) {
     let espd = applyMovement(e, avoiding, drag, dt);
     if (espd > 30 && Math.random() < 0.4) spawnExhaust(e, e.color);
 
-    // Kamikazes don't shoot
+    // Kamikazes don't shoot; gunships only fire while charging
     if (e.type === 'kamikaze') continue;
+    if (e.type === 'gunship' && e.attackState === 'extend') continue;
     // Shooting — sometimes target a nearby ally instead
     e.shootCD -= dt;
     let shootTarget = { x: player.x, y: player.y, vx: player.vx, vy: player.vy };
@@ -592,7 +618,7 @@ function updateEnemies(dt) {
         e.shootCD = 2 + Math.random();
       } else {
         fireProjectile('enemy', fx, fy, shotAngle, 'enemyPlasma');
-        e.shootCD = e.type === 'drone' ? 1.2 + Math.random()*0.5 : 0.7 + Math.random()*0.4;
+        e.shootCD = e.type === 'drone' ? 1.2 + Math.random()*0.5 : 0.4 + Math.random()*0.3;
       }
     }
   }
