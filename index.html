@@ -371,33 +371,36 @@ function leadShot(ex, ey, evx, evy, tx, ty, tvx, tvy, bulletSpeed) {
 }
 
 // Returns the avoidance force applied (0 if none) so callers can boost speed cap
-function avoidPlanets(obj, dt) {
+function avoidPlanets(obj, dt, navTarget) {
   let totalForce = 0;
   for (let pl of planets) {
     let dx = obj.x - pl.x, dy = obj.y - pl.y;
     let dist = Math.sqrt(dx*dx + dy*dy);
-    let dangerZone = pl.radius + Math.max(250, pl.radius * 0.3);
+    let dangerZone = pl.radius + Math.max(250, pl.radius * 0.5);
     if (dist < dangerZone) {
       let scaledG = 600 * (pl.radius / 275);
       let gravForce = scaledG * pl.mass / (dist * dist);
-      let urgency = (dangerZone - dist) / dangerZone;
+      let urgency = (dangerZone - dist) / (dangerZone - pl.radius);
       urgency = urgency * urgency;
-      let avoidForce = (gravForce + obj.speed * 2) * urgency;
+      let avoidForce = gravForce + (gravForce + obj.speed * 2) * urgency;
       let nx = dx / dist, ny = dy / dist;
       // Push away from planet
       obj.vx += nx * avoidForce * dt;
       obj.vy += ny * avoidForce * dt;
-      // Tangential push so entities curve around instead of bouncing back.
-      // Use velocity dot normal to pick the tangent direction.
-      let dot = obj.vx * nx + obj.vy * ny;
-      if (dot < 0) { // heading toward planet
+      // Tangential push — curve toward navTarget if provided, else follow velocity.
+      let sign;
+      if (navTarget) {
+        let tdx = navTarget.x - pl.x, tdy = navTarget.y - pl.y;
+        let cross = nx * tdy - ny * tdx;
+        sign = cross >= 0 ? 1 : -1;
+      } else {
         let cross = obj.vx * ny - obj.vy * nx;
-        let sign = cross >= 0 ? 1 : -1;
-        let tx = -ny * sign, ty = nx * sign;
-        obj.vx += tx * avoidForce * 0.6 * dt;
-        obj.vy += ty * avoidForce * 0.6 * dt;
+        sign = cross >= 0 ? 1 : -1;
       }
-      totalForce += avoidForce * urgency;
+      let tx = -ny * sign, ty = nx * sign;
+      obj.vx += tx * avoidForce * 0.6 * dt;
+      obj.vy += ty * avoidForce * 0.6 * dt;
+      if (urgency > 0.15) totalForce += avoidForce;
     }
   }
   return totalForce;
@@ -541,12 +544,15 @@ function updateEnemies(dt) {
     let targetAngle = Math.atan2(dy, dx);
     e.angle = targetAngle;
 
+    // Avoid planets — when escaping, skip attack steering entirely
+    let avoiding = avoidPlanets(e, dt, player);
+
     // Kamikaze — charge straight at the player, no orbit
     if (e.type === 'kamikaze') {
       let accel = e.speed * dt * 2.5;
       e.vx += Math.cos(targetAngle) * accel;
       e.vy += Math.sin(targetAngle) * accel;
-    } else {
+    } else if (!avoiding) {
     // Approach/retreat to maintain preferred distance
     let radialForce = 0;
     if (dist > e.preferDist + 40) {
@@ -569,13 +575,8 @@ function updateEnemies(dt) {
     e.vy += Math.sin(perp) * orbitStrength * accel;
     }
 
-
-    // Avoid planets — boost speed cap when escaping
-    let avoiding = avoidPlanets(e, dt);
-    let maxSpd = avoiding > 0 ? e.speed * 2 : e.speed;
-
     let espd = Math.sqrt(e.vx*e.vx + e.vy*e.vy);
-    if (espd > maxSpd) { e.vx *= maxSpd/espd; e.vy *= maxSpd/espd; }
+    if (!avoiding && espd > e.speed) { e.vx *= e.speed/espd; e.vy *= e.speed/espd; }
     e.vx *= Math.pow(0.97, dt*60); e.vy *= Math.pow(0.97, dt*60);
     e.x += e.vx * dt; e.y += e.vy * dt;
 
@@ -622,7 +623,10 @@ function updateAllies(dt) {
       let d = Math.sqrt(dx*dx + dy*dy);
       if (d < tDist) { tDist = d; target = e; }
     }
-    if (target) {
+    // Avoid planets — when escaping, skip attack steering entirely
+    let aAvoiding = avoidPlanets(a, dt, target || player);
+
+    if (target && !aAvoiding) {
       let dx = target.x - a.x, dy = target.y - a.y;
       let targetAngle = Math.atan2(dy, dx);
       a.angle = targetAngle;
@@ -648,7 +652,7 @@ function updateAllies(dt) {
         fireProjectile('ally', fx, fy, shotAngle, 'plasma');
         a.shootCD = 0.8 + Math.random() * 0.4;
       }
-    } else {
+    } else if (!aAvoiding) {
       // No enemies — drift near player
       let dx = player.x - a.x, dy = player.y - a.y;
       a.angle = Math.atan2(dy, dx);
@@ -658,12 +662,8 @@ function updateAllies(dt) {
         a.vy += (dy/d) * a.speed * dt;
       }
     }
-
-    let aAvoiding = avoidPlanets(a, dt);
-    let aMaxSpd = aAvoiding > 0 ? a.speed * 2 : a.speed;
-
     let aspd = Math.sqrt(a.vx*a.vx + a.vy*a.vy);
-    if (aspd > aMaxSpd) { a.vx *= aMaxSpd/aspd; a.vy *= aMaxSpd/aspd; }
+    if (!aAvoiding && aspd > a.speed) { a.vx *= a.speed/aspd; a.vy *= a.speed/aspd; }
     a.vx *= Math.pow(0.97, dt*60); a.vy *= Math.pow(0.97, dt*60);
     a.x += a.vx * dt; a.y += a.vy * dt;
 

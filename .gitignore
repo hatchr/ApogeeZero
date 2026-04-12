@@ -1,0 +1,12 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/obj
+/Properties
+/.vs
+/bin
+/Game.Web.csproj
+/Game.Web.csproj.user
+/Game.Web.sln
+/Program.cs
