@@ -246,11 +246,12 @@ function spawnEnemy() {
   if (wave < 3) {
     type = 'drone';
   } else if (wave < 5) {
-    type = roll < 0.6 ? 'drone' : 'gunship';
+    type = roll < 0.5 ? 'drone' : roll < 0.8 ? 'gunship' : 'kamikaze';
   } else {
-    if (roll < 0.4) type = 'drone';
-    else if (roll < 0.75) type = 'gunship';
-    else type = 'bruiser';
+    if (roll < 0.35) type = 'drone';
+    else if (roll < 0.6) type = 'gunship';
+    else if (roll < 0.85) type = 'bruiser';
+    else type = 'kamikaze';
   }
   let e = { x: pos.x, y: pos.y, vx: 0, vy: 0, angle: 0, type, radius: 14, shootCD: Math.random() * 2 + 1 };
   if (type === 'drone') {
@@ -261,10 +262,15 @@ function spawnEnemy() {
     e.hp = 50 + diff * 5; e.maxHp = e.hp; e.speed = 150 + diff * 3; e.color = '#f80'; e.accent = '#fc4'; e.dmg = 12; e.score = 250; e.radius = 16;
     e.preferDist = 280 + Math.random() * 120;
     e.orbitDir = Math.random() < 0.5 ? 1 : -1;
-  } else {
+  } else if (type === 'bruiser') {
     e.hp = 120 + diff * 10; e.maxHp = e.hp; e.speed = 80 + diff * 2; e.color = '#a0f'; e.accent = '#c6f'; e.dmg = 25; e.score = 500; e.radius = 22;
     e.preferDist = 320 + Math.random() * 100;
     e.orbitDir = Math.random() < 0.5 ? 1 : -1;
+  } else {
+    // Kamikaze — fast, fragile, charges and explodes on contact
+    e.hp = 15 + diff * 2; e.maxHp = e.hp; e.speed = 300 + diff * 8; e.color = '#cf0'; e.accent = '#ff0'; e.dmg = 30; e.score = 150; e.radius = 10;
+    e.preferDist = 0;
+    e.orbitDir = 0;
   }
   enemies.push(e);
   enemiesAlive++;
@@ -531,6 +537,12 @@ function updateEnemies(dt) {
     let targetAngle = Math.atan2(dy, dx);
     e.angle = targetAngle;
 
+    // Kamikaze — charge straight at the player, no orbit
+    if (e.type === 'kamikaze') {
+      let accel = e.speed * dt * 2.5;
+      e.vx += Math.cos(targetAngle) * accel;
+      e.vy += Math.sin(targetAngle) * accel;
+    } else {
     // Approach/retreat to maintain preferred distance
     let radialForce = 0;
     if (dist > e.preferDist + 40) {
@@ -551,6 +563,7 @@ function updateEnemies(dt) {
     e.vy += Math.sin(targetAngle) * radialForce * accel;
     e.vx += Math.cos(perp) * orbitStrength * accel;
     e.vy += Math.sin(perp) * orbitStrength * accel;
+    }
 
 
     // Avoid planets — boost speed cap when escaping
@@ -567,6 +580,8 @@ function updateEnemies(dt) {
       spawnExhaust(e, e.color);
     }
 
+    // Kamikazes don't shoot
+    if (e.type === 'kamikaze') continue;
     // Shooting — sometimes target a nearby ally instead
     e.shootCD -= dt;
     let shootTarget = { x: player.x, y: player.y, vx: player.vx, vy: player.vy };
@@ -757,6 +772,17 @@ function updateCollisions(dt) {
     let e = enemies[j];
     let ddx = e.x - player.x, ddy = e.y - player.y;
     if (ddx*ddx + ddy*ddy < (e.radius + player.radius) * (e.radius + player.radius)) {
+      if (e.type === 'kamikaze') {
+        // Kamikaze explodes on contact — big damage, self-destructs
+        spawnParticles(e.x, e.y, '#cf0', 25, 250);
+        spawnParticles(e.x, e.y, '#ff0', 15, 180);
+        screenShake(0.3);
+        damagePlayer(e.dmg);
+        score += e.score;
+        enemies.splice(j, 1);
+        enemiesAlive--;
+        continue;
+      }
       if (invincTimer <= 0 && shieldTimer <= 0) {
         spawnParticles(player.x, player.y, '#0ff', 8, 100);
         screenShake(0.15);
@@ -804,6 +830,19 @@ function updateCollisions(dt) {
       let ddx = a.x - e.x, ddy = a.y - e.y;
       let dist = Math.sqrt(ddx*ddx + ddy*ddy);
       if (dist < a.radius + e.radius) {
+        if (e.type === 'kamikaze') {
+          // Kamikaze explodes on ally contact too
+          spawnParticles(e.x, e.y, '#cf0', 25, 250);
+          spawnParticles(e.x, e.y, '#ff0', 15, 180);
+          screenShake(0.2);
+          a.hp -= e.dmg;
+          score += e.score;
+          enemies.splice(j, 1);
+          enemiesAlive--;
+          if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); allies.splice(i, 1); allyDead = true; }
+          if (allyDead) break;
+          continue;
+        }
         let nx = ddx/dist, ny = ddy/dist;
         a.x = e.x + nx * (a.radius + e.radius);
         a.y = e.y + ny * (a.radius + e.radius);
@@ -899,7 +938,7 @@ function update(dt) {
   } else { shakeX = 0; shakeY = 0; }
 }
 
-function drawShip(x, y, angle, color, accent, radius, hp, maxHp, isPlayer, showHpBar) {
+function drawShip(x, y, angle, color, accent, radius, hp, maxHp, isPlayer, showHpBar, type) {
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(angle);
@@ -977,6 +1016,27 @@ function drawShip(x, y, angle, color, accent, radius, hp, maxHp, isPlayer, showH
       ctx.lineTo(-radius*0.3, -radius*0.45);
       ctx.moveTo(radius*0.5, radius*0.2);
       ctx.lineTo(-radius*0.3, radius*0.45);
+      ctx.stroke();
+    } else if (type === 'kamikaze') {
+      // Kamikaze — sharp dart/wedge
+      ctx.beginPath();
+      ctx.moveTo(radius*1.6, 0);
+      ctx.lineTo(-radius*0.5, -radius*0.6);
+      ctx.lineTo(-radius*0.2, 0);
+      ctx.lineTo(-radius*0.5, radius*0.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      // Danger stripes
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(radius*0.8, 0);
+      ctx.lineTo(radius*0.1, -radius*0.35);
+      ctx.moveTo(radius*0.8, 0);
+      ctx.lineTo(radius*0.1, radius*0.35);
       ctx.stroke();
     } else {
       // Drone — small triangle
@@ -1119,7 +1179,7 @@ function draw() {
 
   // Enemies
   for (let e of enemies) {
-    drawShip(e.x, e.y, e.angle, e.color, e.accent, e.radius, e.hp, e.maxHp, false, true);
+    drawShip(e.x, e.y, e.angle, e.color, e.accent, e.radius, e.hp, e.maxHp, false, true, e.type);
   }
 
   // Allies — same ship style as player, green tint
