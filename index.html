@@ -280,7 +280,7 @@ function spawnEnemy() {
     // Kamikaze — fast, fragile, charges and explodes on contact
     e.hp = 15 + diff * 2; e.maxHp = e.hp; e.speed = 300 + diff * 8; e.color = '#cf0'; e.accent = '#ff0'; e.dmg = 30; e.score = 150; e.radius = 10;
     e.preferDist = 0;
-    e.orbitDir = 0; e.turnSpeed = 8;
+    e.orbitDir = 0; e.turnSpeed = 1;
   }
   enemies.push(e);
   enemiesAlive++;
