@@ -3,7 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Apogee Zero</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -80,6 +80,9 @@ canvas { display: block; }
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
+const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+const MAX_PARTICLES = isMobile ? 120 : 300;
+function glow(blur, color) { if (!isMobile) { ctx.shadowBlur = blur; if (color) ctx.shadowColor = color; } }
 let W, H;
 function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
 resize();
@@ -171,7 +174,9 @@ function makePlanets() {
     } while (tooClose && ++tries < 200);
     let c = asteroidColors[i % asteroidColors.length];
     let dz = r + Math.max(125, r * 0.25);
-    planets.push({ x, y, radius: r, mass: r * 80, gravParam: 600 * r / 275 * r * 80, dangerZone: dz, dangerMargin: dz - r, color: c.base, accent: c.accent, glow: c.glow });
+    let grad = ctx.createRadialGradient(x - r*0.3, y - r*0.3, r*0.1, x, y, r);
+    grad.addColorStop(0, c.accent); grad.addColorStop(1, c.base);
+    planets.push({ x, y, radius: r, mass: r * 80, gravParam: 600 * r / 275 * r * 80, dangerZone: dz, dangerMargin: dz - r, color: c.base, accent: c.accent, glow: c.glow, grad });
   }
   // Planets — huge, colorful
   let planetColors = [
@@ -196,7 +201,9 @@ function makePlanets() {
     } while (tooClose && ++tries < 200);
     let c = planetColors[i % planetColors.length];
     let dz = r + Math.max(125, r * 0.25);
-    planets.push({ x, y, radius: r, mass: r * 80, gravParam: 600 * r / 275 * r * 80, dangerZone: dz, dangerMargin: dz - r, color: c.base, accent: c.accent, glow: c.glow });
+    let grad = ctx.createRadialGradient(x - r*0.3, y - r*0.3, r*0.1, x, y, r);
+    grad.addColorStop(0, c.accent); grad.addColorStop(1, c.base);
+    planets.push({ x, y, radius: r, mass: r * 80, gravParam: 600 * r / 275 * r * 80, dangerZone: dz, dangerMargin: dz - r, color: c.base, accent: c.accent, glow: c.glow, grad });
   }
 }
 
@@ -282,7 +289,7 @@ function spawnEnemy() {
 function screenShake(dur) { shakeDur = Math.max(shakeDur, dur); }
 
 function spawnParticles(x, y, color, count, speed) {
-  let room = 300 - particles.length;
+  let room = MAX_PARTICLES - particles.length;
   if (room <= 0) return;
   if (count > room) count = room;
   for (let i = 0; i < count; i++) {
@@ -327,7 +334,7 @@ function handlePlanetCollision(obj, pl) {
 }
 
 function spawnExhaust(obj, color) {
-  if (particles.length >= 300) return;
+  if (particles.length >= MAX_PARTICLES) return;
   let ex = obj.x - Math.cos(obj.angle) * obj.radius;
   let ey = obj.y - Math.sin(obj.angle) * obj.radius;
   let spread = (Math.random() - 0.5) * 0.6;
@@ -939,8 +946,7 @@ function drawShip(x, y, angle, color, accent, radius, hp, maxHp, isPlayer, showH
   ctx.rotate(angle);
 
   // Glow
-  ctx.shadowColor = color;
-  ctx.shadowBlur = 6;
+  glow(6, color);
 
   if (isPlayer) {
     // Player ship — sleek arrow
@@ -1052,7 +1058,7 @@ function drawShip(x, y, angle, color, accent, radius, hp, maxHp, isPlayer, showH
     ctx.arc(0, 0, 2, 0, Math.PI*2);
     ctx.fill();
   }
-  ctx.shadowBlur = 0;
+  glow(0);
   ctx.restore();
 
   // HP bar (non-player ships)
@@ -1089,13 +1095,9 @@ function draw() {
   // Planets
   for (let pl of planets) {
     // Glow
-    ctx.shadowColor = pl.glow;
-    ctx.shadowBlur = 20;
+    glow(20, pl.glow);
     // Body
-    let grad = ctx.createRadialGradient(pl.x - pl.radius*0.3, pl.y - pl.radius*0.3, pl.radius*0.1, pl.x, pl.y, pl.radius);
-    grad.addColorStop(0, pl.accent);
-    grad.addColorStop(1, pl.color);
-    ctx.fillStyle = grad;
+    ctx.fillStyle = pl.grad;
     ctx.beginPath();
     ctx.arc(pl.x, pl.y, pl.radius, 0, Math.PI*2);
     ctx.fill();
@@ -1103,7 +1105,7 @@ function draw() {
     ctx.strokeStyle = pl.glow;
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    ctx.shadowBlur = 0;
+    glow(0);
     // Surface detail — a couple of darker patches
     ctx.fillStyle = 'rgba(0,0,0,0.2)';
     ctx.beginPath();
@@ -1126,8 +1128,7 @@ function draw() {
   // Projectiles
   for (let p of projectiles) {
     ctx.fillStyle = p.color;
-    ctx.shadowColor = p.color;
-    ctx.shadowBlur = 4;
+    glow(4, p.color);
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
     ctx.fill();
@@ -1141,7 +1142,7 @@ function draw() {
       ctx.stroke();
     }
   }
-  ctx.shadowBlur = 0;
+  glow(0);
 
   // Powerups
   for (let pu of powerups) {
@@ -1152,8 +1153,7 @@ function draw() {
     else { col = '#f0f'; symbol = '*'; }
     // Fading when about to expire
     ctx.globalAlpha = pu.life < 3 ? 0.3 + 0.7 * (pu.life / 3) : 1;
-    ctx.shadowColor = col;
-    ctx.shadowBlur = 6;
+    glow(6, col);
     ctx.strokeStyle = col;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -1166,7 +1166,7 @@ function draw() {
     ctx.textAlign = 'left';
   }
   ctx.globalAlpha = 1;
-  ctx.shadowBlur = 0;
+  glow(0);
 
   // Enemies
   for (let e of enemies) {
@@ -1190,14 +1190,13 @@ function draw() {
     let alpha = shieldTimer < 2 ? shieldTimer / 2 : 0.6;
     ctx.globalAlpha = alpha;
     ctx.strokeStyle = '#48f';
-    ctx.shadowColor = '#48f';
-    ctx.shadowBlur = 20;
+    glow(20, '#48f');
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(player.x, player.y, player.radius + 8, 0, Math.PI * 2);
     ctx.stroke();
     ctx.globalAlpha = 1;
-    ctx.shadowBlur = 0;
+    glow(0);
   }
 
   ctx.restore();
@@ -1213,10 +1212,9 @@ function drawBar(x, y, w, h, pct, color, label, labelColor) {
   ctx.fillStyle = '#222';
   ctx.fillRect(x, y, w, h);
   ctx.fillStyle = color;
-  ctx.shadowColor = color;
-  ctx.shadowBlur = h > 10 ? 8 : 6;
+  glow(h > 10 ? 8 : 6, color);
   ctx.fillRect(x, y, w * pct, h);
-  ctx.shadowBlur = 0;
+  glow(0);
   ctx.fillStyle = labelColor || color;
   ctx.font = (h > 10 ? 12 : 10) + 'px Courier New';
   ctx.fillText(label, x + w + 8, y + h - (h > 10 ? 3 : 0));
@@ -1240,48 +1238,43 @@ function drawHUD() {
 
   // Lives
   ctx.fillStyle = '#0ff';
-  ctx.shadowColor = '#0ff';
-  ctx.shadowBlur = 6;
+  glow(6, '#0ff');
   ctx.font = '16px Courier New';
   ctx.fillText('LIVES: ' + lives, barX, missBarY + 8 + 18);
-  ctx.shadowBlur = 0;
+  glow(0);
 
   // Score
   ctx.fillStyle = '#ff0';
-  ctx.shadowColor = '#ff0';
-  ctx.shadowBlur = 6;
+  glow(6, '#ff0');
   ctx.font = '20px Courier New';
   ctx.textAlign = 'right';
   ctx.fillText('SCORE: ' + score, W - 20, 34);
-  ctx.shadowBlur = 0;
+  glow(0);
 
   // Wave
   ctx.fillStyle = '#0f0';
-  ctx.shadowColor = '#0f0';
-  ctx.shadowBlur = 6;
+  glow(6, '#0f0');
   ctx.font = '16px Courier New';
   ctx.fillText('WAVE ' + wave, W - 20, 58);
-  ctx.shadowBlur = 0;
+  glow(0);
   ctx.textAlign = 'left';
 
   // Active powerup indicators
   let puY = missBarY + 8 + 36;
   if (shieldTimer > 0) {
     ctx.fillStyle = '#48f';
-    ctx.shadowColor = '#48f';
-    ctx.shadowBlur = 6;
+    glow(6, '#48f');
     ctx.font = '14px Courier New';
     ctx.fillText('SHIELD ' + Math.ceil(shieldTimer) + 's', barX, puY);
-    ctx.shadowBlur = 0;
+    glow(0);
     puY += 18;
   }
   if (spreadTimer > 0) {
     ctx.fillStyle = '#f0f';
-    ctx.shadowColor = '#f0f';
-    ctx.shadowBlur = 6;
+    glow(6, '#f0f');
     ctx.font = '14px Courier New';
     ctx.fillText('SPREAD ' + Math.ceil(spreadTimer) + 's', barX, puY);
-    ctx.shadowBlur = 0;
+    glow(0);
   }
 
   // Radar
