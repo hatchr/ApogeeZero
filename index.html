@@ -720,7 +720,7 @@ function updateProjectiles(dt) {
             if (Math.random() < 0.2) {
               let types = ['health', 'shield', 'spread'];
               let t = types[Math.floor(Math.random() * types.length)];
-              powerups.push({ x: e.x, y: e.y, type: t, life: 15, radius: 12 });
+              powerups.push({ x: e.x, y: e.y, vx: 0, vy: 0, type: t, life: 15, radius: 12 });
             }
             enemies.splice(j, 1);
             enemiesAlive--;
@@ -899,7 +899,17 @@ function updatePowerups(dt) {
     pu.life -= dt;
     if (pu.life <= 0) { powerups.splice(i, 1); continue; }
     let dx = player.x - pu.x, dy = player.y - pu.y;
-    if (dx*dx + dy*dy < (player.radius + pu.radius) * (player.radius + pu.radius)) {
+    let distSq = dx*dx + dy*dy;
+    let dist = Math.sqrt(distSq);
+    // Powerups gravitate toward player
+    let force = 5000000 / (distSq + 500);
+    pu.vx += (dx / dist) * force * dt;
+    pu.vy += (dy / dist) * force * dt;
+    pu.x += pu.vx * dt;
+    pu.y += pu.vy * dt;
+    dx = player.x - pu.x; dy = player.y - pu.y;
+    distSq = dx*dx + dy*dy;
+    if (distSq < (player.radius + pu.radius) * (player.radius + pu.radius)) {
       if (pu.type === 'health') {
         player.hp = Math.min(player.maxHp, player.hp + 40);
         spawnParticles(pu.x, pu.y, '#0f0', 10, 80);
