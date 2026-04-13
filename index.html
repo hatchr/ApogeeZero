@@ -1397,9 +1397,18 @@ function drawHUD() {
 function gameOver() {
   gameRunning = false;
   gameOverActive = true;
+  setTimeout(() => document.exitPointerLock(), 0);
   document.getElementById('finalScore').textContent = 'Score: ' + score;
   document.getElementById('finalWave').textContent = 'Wave Reached: ' + wave;
-  document.getElementById('nameInput').value = localStorage.getItem('sd_playerName') || '';
+  // Only show name input and save button if score qualifies for top 5
+  let lb = JSON.parse(localStorage.getItem('sd_leaderboard') || '[]');
+  lb.sort((a,b) => b.score - a.score);
+  let qualifies = score > 0 && (lb.length < 5 || score > lb[lb.length - 1].score);
+  document.getElementById('nameInput').style.display = qualifies ? '' : 'none';
+  document.getElementById('submitScore').style.display = qualifies ? '' : 'none';
+  if (qualifies) {
+    document.getElementById('nameInput').value = localStorage.getItem('sd_playerName') || '';
+  }
   document.getElementById('gameOver').classList.add('active');
   showLeaderboard();
 }
