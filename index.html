@@ -113,7 +113,8 @@ let score, wave, waveTimer, waveEnemiesLeft, enemiesAlive, lives;
 let gameRunning = false, gameOverActive = false;
 let lastTime = 0, plasmaCD = 0, missileCD = 0;
 let invincTimer = 0;
-let shieldTimer = 0, spreadTimer = 0;
+let shieldTimer = 0, spreadTimer = 0, empTimer = 0;
+let empWave = 0, empWaveMax = 0;
 let plasmaEnergy = 100, plasmaMax = 100, plasmaRecharge = 15; // per second
 let missileEnergy = 100, missileMax = 100, missileRecharge = 8; // per second
 let plasmaCost = 5, missileCost = 20;
@@ -140,7 +141,7 @@ function initGame() {
   score = 0; wave = 0; waveTimer = 2; waveEnemiesLeft = 0; enemiesAlive = 0;
   lives = 3; invincTimer = 0;
   plasmaCD = 0; missileCD = 0;
-  shieldTimer = 0; spreadTimer = 0;
+  shieldTimer = 0; spreadTimer = 0; empTimer = 0; empWave = 0; empWaveMax = 0;
   plasmaEnergy = plasmaMax; missileEnergy = missileMax;
   camX = 0; camY = 0;
   shakeX = 0; shakeY = 0; shakeDur = 0;
@@ -573,6 +574,13 @@ function updatePlayer(dt) {
 function updateEnemies(dt) {
   let drag = Math.pow(0.97, dt * 60);
   for (let e of enemies) {
+    // EMP: no AI, no drag, just drift and spin
+    if (empTimer > 0) {
+      e.angle += (e.spinRate || 0) * dt;
+      e.x += e.vx * dt;
+      e.y += e.vy * dt;
+      continue;
+    }
     let dx = player.x - e.x, dy = player.y - e.y;
     let dist = Math.sqrt(dx*dx + dy*dy);
     let desiredAngle = Math.atan2(dy, dx);
@@ -651,6 +659,13 @@ function updateEnemies(dt) {
 function updateAllies(dt) {
   let drag = Math.pow(0.97, dt * 60);
   for (let a of allies) {
+    // EMP: no AI, no drag, just drift and spin
+    if (empTimer > 0) {
+      a.angle += (a.spinRate || 0) * dt;
+      a.x += a.vx * dt;
+      a.y += a.vy * dt;
+      continue;
+    }
     // Find nearest enemy
     let target = null, tDist = Infinity;
     for (let e of enemies) {
@@ -718,7 +733,7 @@ function updateProjectiles(dt) {
             spawnParticles(e.x, e.y, '#ff0', 10, 150);
             screenShake(0.15);
             if (Math.random() < 0.2) {
-              let types = ['health', 'shield', 'spread'];
+              let types = ['health', 'shield', 'spread', 'emp'];
               let t = types[Math.floor(Math.random() * types.length)];
               powerups.push({ x: e.x, y: e.y, vx: 0, vy: 0, type: t, life: 15, radius: 12 });
             }
@@ -892,6 +907,7 @@ function updatePowerups(dt) {
   // Powerup timers
   if (shieldTimer > 0) shieldTimer -= dt;
   if (spreadTimer > 0) spreadTimer -= dt;
+  if (empTimer > 0) empTimer -= dt;
 
   // Powerups — pickup and expire
   for (let i = powerups.length - 1; i >= 0; i--) {
@@ -919,6 +935,15 @@ function updatePowerups(dt) {
       } else if (pu.type === 'spread') {
         spreadTimer = 10;
         spawnParticles(pu.x, pu.y, '#f0f', 10, 80);
+      } else if (pu.type === 'emp') {
+        empTimer = 6;
+        // Assign random spin to all enemies and allies
+        for (let e of enemies) e.spinRate = (Math.random() - 0.5) * 8;
+        for (let a of allies) a.spinRate = (Math.random() - 0.5) * 8;
+        spawnParticles(player.x, player.y, '#ff0', 30, 200);
+        spawnParticles(player.x, player.y, '#fff', 15, 150);
+        screenShake(0.4);
+        empWave = 0; empWaveMax = 2000;
       }
       powerups.splice(i, 1);
     }
@@ -959,6 +984,12 @@ function update(dt) {
   updateCollisions(dt);
   updatePowerups(dt);
   updateParticles(dt);
+
+  // EMP shockwave expansion
+  if (empWave < empWaveMax) {
+    empWave += 1000 * dt;
+    if (empWave > empWaveMax) empWave = empWaveMax;
+  }
 
   // Camera
   camX = player.x; camY = player.y;
@@ -1178,6 +1209,7 @@ function draw() {
     let col, symbol;
     if (pu.type === 'health') { col = '#0f0'; symbol = '+'; }
     else if (pu.type === 'shield') { col = '#48f'; symbol = 'S'; }
+    else if (pu.type === 'emp') { col = '#ff0'; symbol = 'E'; }
     else { col = '#f0f'; symbol = '*'; }
     // Fading when about to expire
     ctx.globalAlpha = pu.life < 3 ? 0.3 + 0.7 * (pu.life / 3) : 1;
@@ -1222,6 +1254,28 @@ function draw() {
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(player.x, player.y, player.radius + 8, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    glow(0);
+  }
+
+  // EMP shockwave ring
+  if (empWave > 0 && empWave < empWaveMax) {
+    let progress = empWave / empWaveMax;
+    let alpha = 1 - progress;
+    ctx.globalAlpha = alpha * 0.8;
+    ctx.strokeStyle = '#ff0';
+    glow(15, '#ff0');
+    ctx.lineWidth = 4 * (1 - progress) + 1;
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, empWave, 0, Math.PI * 2);
+    ctx.stroke();
+    // Inner brighter ring
+    ctx.globalAlpha = alpha * 0.4;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2 * (1 - progress);
+    ctx.beginPath();
+    ctx.arc(player.x, player.y, empWave * 0.95, 0, Math.PI * 2);
     ctx.stroke();
     ctx.globalAlpha = 1;
     glow(0);
@@ -1303,6 +1357,14 @@ function drawHUD() {
     ctx.font = '14px Courier New';
     ctx.fillText('SPREAD ' + Math.ceil(spreadTimer) + 's', barX, puY);
     glow(0);
+    puY += 18;
+  }
+  if (empTimer > 0) {
+    ctx.fillStyle = '#ff0';
+    glow(6, '#ff0');
+    ctx.font = '14px Courier New';
+    ctx.fillText('EMP ' + Math.ceil(empTimer) + 's', barX, puY);
+    glow(0);
   }
 
   // Radar
@@ -1368,7 +1430,7 @@ function drawHUD() {
   for (let a of allies) blip(a.x, a.y, '#0c6', 3);
   // Powerups
   for (let pu of powerups) {
-    let col = pu.type === 'health' ? '#0f0' : pu.type === 'shield' ? '#48f' : '#f0f';
+    let col = pu.type === 'health' ? '#0f0' : pu.type === 'shield' ? '#48f' : pu.type === 'emp' ? '#ff0' : '#f0f';
     blip(pu.x, pu.y, col, 2);
   }
 
