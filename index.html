@@ -393,6 +393,37 @@ function leadShot(ex, ey, evx, evy, tx, ty, tvx, tvy, bulletSpeed) {
   return Math.atan2(dy + dvy*t, dx + dvx*t);
 }
 
+// Canonical four-axis thrust, applied in the ship's local frame. Every ship —
+// player, enemy, ally — uses this. f in [-1,1] is forward/reverse (W = +1 ×1.0,
+// S = -1 ×0.5). s in [-1,1] is strafe (D = +1 ×0.7, A = -1 ×0.7).
+function thrustLocal(obj, f, s, accel) {
+  if (f > 0) {
+    obj.vx += Math.cos(obj.angle) * accel * f;
+    obj.vy += Math.sin(obj.angle) * accel * f;
+  } else if (f < 0) {
+    obj.vx += Math.cos(obj.angle) * accel * f * 0.5;
+    obj.vy += Math.sin(obj.angle) * accel * f * 0.5;
+  }
+  if (s !== 0) {
+    let perp = obj.angle + Math.PI / 2;
+    obj.vx += Math.cos(perp) * accel * s * 0.7;
+    obj.vy += Math.sin(perp) * accel * s * 0.7;
+  }
+}
+
+// AI helper: "thrust toward this world-space heading." Picks W or S from
+// cos(delta), A or D from sin(delta), then applies via thrustLocal. Keeps AIs
+// bound to the same four buttons the player has — no world-frame cheats.
+function thrustToward(obj, heading, accel) {
+  let delta = heading - obj.angle;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  let cf = Math.cos(delta), sf = Math.sin(delta);
+  let f = Math.abs(cf) > 0.1 ? Math.sign(cf) : 0;
+  let s = Math.abs(sf) > 0.1 ? Math.sign(sf) : 0;
+  thrustLocal(obj, f, s, accel);
+}
+
 // Returns nonzero when avoidance is strong enough to suppress attack steering.
 // Ship rotates its nose toward an escape heading (radial + tangential bias)
 // and fires thrust using the player's W/S/A/D vocabulary. No world-frame cheats.
@@ -420,28 +451,10 @@ function avoidPlanets(obj, dt, navTarget) {
   }
   if (totalUrgency < 0.15) return 0;
   // Flip and burn: rotate nose toward escape heading, then thrust using the
-  // same four axes the player has (W ×1.0, S ×0.5, A/D ×0.7).
+  // same four axes the player has.
   let escAngle = Math.atan2(escY, escX);
   obj.angle = turnToward(obj.angle, escAngle, obj.turnSpeed, dt);
-  let accel = obj.speed * dt * 2.0;
-  let delta = escAngle - obj.angle;
-  while (delta > Math.PI) delta -= Math.PI * 2;
-  while (delta < -Math.PI) delta += Math.PI * 2;
-  let cf = Math.cos(delta), sf = Math.sin(delta);
-  if (cf > 0.1) {
-    obj.vx += Math.cos(obj.angle) * accel;
-    obj.vy += Math.sin(obj.angle) * accel;
-  } else if (cf < -0.1) {
-    obj.vx -= Math.cos(obj.angle) * accel * 0.5;
-    obj.vy -= Math.sin(obj.angle) * accel * 0.5;
-  }
-  if (sf > 0.1) {
-    obj.vx += Math.cos(obj.angle + Math.PI/2) * accel * 0.7;
-    obj.vy += Math.sin(obj.angle + Math.PI/2) * accel * 0.7;
-  } else if (sf < -0.1) {
-    obj.vx += Math.cos(obj.angle - Math.PI/2) * accel * 0.7;
-    obj.vy += Math.sin(obj.angle - Math.PI/2) * accel * 0.7;
-  }
+  thrustToward(obj, escAngle, obj.speed * dt * 2.0);
   return totalUrgency;
 }
 
@@ -541,14 +554,10 @@ function updatePlayer(dt) {
   player.angle += mouseDX * 0.004;
   mouseDX = 0;
 
-  // Player thrust
-  let thrust = 300;
-  let ax = 0, ay = 0;
-  if (keys['w']) { ax += Math.cos(player.angle) * thrust; ay += Math.sin(player.angle) * thrust; }
-  if (keys['s']) { ax -= Math.cos(player.angle) * thrust * 0.5; ay -= Math.sin(player.angle) * thrust * 0.5; }
-  if (keys['a']) { ax += Math.cos(player.angle - Math.PI/2) * thrust * 0.7; ay += Math.sin(player.angle - Math.PI/2) * thrust * 0.7; }
-  if (keys['d']) { ax += Math.cos(player.angle + Math.PI/2) * thrust * 0.7; ay += Math.sin(player.angle + Math.PI/2) * thrust * 0.7; }
-  player.vx += ax * dt; player.vy += ay * dt;
+  // Player thrust — keys → (f, s) intent → shared local-frame thrust.
+  let f = (keys['w'] ? 1 : 0) - (keys['s'] ? 1 : 0);
+  let s = (keys['d'] ? 1 : 0) - (keys['a'] ? 1 : 0);
+  thrustLocal(player, f, s, 300 * dt);
   let damp = Math.pow(0.99, dt * 60);
   player.vx *= damp; player.vy *= damp;
   player.x += player.vx * dt; player.y += player.vy * dt;
@@ -629,31 +638,11 @@ function updateEnemies(dt) {
         e.vy += Math.sin(e.angle) * accel;
         if (dist < e.closeDist) e.attackState = 'break';
       } else if (e.attackState === 'break') {
-        // AI pilots the break using the same four thrust axes the player has:
-        // W = fwd (×1.0), S = reverse (×0.5), A/D = strafe (×0.7). Identical
-        // physics — the drone just uses more buttons than during charge.
+        // AI pilots the break using the same four thrust axes the player has.
+        // Identical physics — the drone just uses more buttons than during charge.
         let away = desiredAngle + Math.PI + Math.PI / 4 * e.strafeDir;
         e.angle = turnToward(e.angle, away, e.turnSpeed, dt);
-        let delta = away - e.angle;
-        while (delta > Math.PI) delta -= Math.PI * 2;
-        while (delta < -Math.PI) delta += Math.PI * 2;
-        let cf = Math.cos(delta), sf = Math.sin(delta);
-        // Forward/reverse axis
-        if (cf > 0.1) {
-          e.vx += Math.cos(e.angle) * accel;
-          e.vy += Math.sin(e.angle) * accel;
-        } else if (cf < -0.1) {
-          e.vx -= Math.cos(e.angle) * accel * 0.5;
-          e.vy -= Math.sin(e.angle) * accel * 0.5;
-        }
-        // Strafe axis
-        if (sf > 0.1) {
-          e.vx += Math.cos(e.angle + Math.PI/2) * accel * 0.7;
-          e.vy += Math.sin(e.angle + Math.PI/2) * accel * 0.7;
-        } else if (sf < -0.1) {
-          e.vx += Math.cos(e.angle - Math.PI/2) * accel * 0.7;
-          e.vy += Math.sin(e.angle - Math.PI/2) * accel * 0.7;
-        }
+        thrustToward(e, away, accel);
         // Once heading away from player, extend out
         if (dx * e.vx + dy * e.vy < 0) e.attackState = 'extend';
       } else {
