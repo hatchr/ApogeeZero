@@ -245,7 +245,10 @@ function spawnAlly() {
     hp: 60, maxHp: 60, radius: 14, speed: 180,
     shootCD: Math.random() * 0.75 + 0.25,
     preferDist: 200 + Math.random() * 80,
-    orbitDir: Math.random() < 0.5 ? 1 : -1, orbitStrength: 1.0, turnSpeed: 5
+    orbitDir: Math.random() < 0.5 ? 1 : -1, orbitStrength: 1.0, turnSpeed: 5,
+    // NOTE: bulletSpeed=350 but ally fires 'plasma' (speed 600). Pre-existing
+    // aim bug — ally over-leads. Preserved here; fix separately if desired.
+    weapon: { owner: 'ally', projectile: 'plasma', bulletSpeed: 350, range: 600, muzzle: 18, cdMin: 0.4, cdSpan: 0.2 }
   });
 }
 
@@ -269,16 +272,19 @@ function spawnEnemy() {
     e.hp = 20 + diff * 3; e.maxHp = e.hp; e.speed = 220 + diff * 5; e.color = '#f44'; e.accent = '#f88'; e.dmg = 8; e.score = 100; e.radius = 12;
     e.attackState = 'charge'; e.closeDist = 150 + Math.random() * 50; e.farDist = 500 + Math.random() * 100;
     e.strafeDir = Math.random() < 0.5 ? 1 : -1; e.turnSpeed = 6;
+    e.weapon = { owner: 'enemy', projectile: 'enemyPlasma', bulletSpeed: 350, range: 800, muzzle: 20, cdMin: 0.4, cdSpan: 0.3 };
   } else if (type === 'gunship') {
     e.hp = 50 + diff * 5; e.maxHp = e.hp; e.speed = 150 + diff * 3; e.color = '#f80'; e.accent = '#fc4'; e.dmg = 12; e.score = 250; e.radius = 16;
     e.preferDist = 180 + Math.random() * 80;
     e.orbitDir = Math.random() < 0.5 ? 1 : -1; e.orbitStrength = 1.0; e.turnSpeed = 4;
+    e.weapon = { owner: 'enemy', projectile: 'enemyPlasma', bulletSpeed: 350, range: 800, muzzle: 20, cdMin: 1.2, cdSpan: 0.5 };
   } else if (type === 'bruiser') {
     e.hp = 120 + diff * 10; e.maxHp = e.hp; e.speed = 80 + diff * 2; e.color = '#a0f'; e.accent = '#c6f'; e.dmg = 25; e.score = 500; e.radius = 22;
     e.preferDist = 320 + Math.random() * 100;
     e.orbitDir = Math.random() < 0.5 ? 1 : -1; e.orbitStrength = 0.6; e.turnSpeed = 3;
+    e.weapon = { owner: 'enemy', projectile: 'enemyMissile', bulletSpeed: 200, range: 800, muzzle: 20, cdMin: 2, cdSpan: 1 };
   } else {
-    // Kamikaze — fast, fragile, charges and explodes on contact
+    // Kamikaze — fast, fragile, charges and explodes on contact (no weapon)
     e.hp = 15 + diff * 2; e.maxHp = e.hp; e.speed = 300 + diff * 8; e.color = '#cf0'; e.accent = '#ff0'; e.dmg = 30; e.score = 150; e.radius = 10;
     e.preferDist = 0;
     e.orbitDir = 0; e.turnSpeed = 1;
@@ -391,6 +397,25 @@ function leadShot(ex, ey, evx, evy, tx, ty, tvx, tvy, bulletSpeed) {
   if (t < 0) return Math.atan2(dy, dx);
   t = Math.min(t, 2);
   return Math.atan2(dy + dvy*t, dx + dvx*t);
+}
+
+// Aim the ship at target (lead-shot) and fire if cooldown's up and in range.
+// Caller picks the target (teams differ on who to shoot); the mechanics of
+// aiming and firing don't. Weapon config (ship.weapon) is attached at spawn:
+//   { owner, projectile, bulletSpeed, range, muzzle, cdMin, cdSpan }
+function aimAndShoot(ship, target, dt) {
+  let w = ship.weapon;
+  let aim = leadShot(ship.x, ship.y, ship.vx, ship.vy,
+                     target.x, target.y, target.vx || 0, target.vy || 0,
+                     w.bulletSpeed);
+  ship.angle = turnToward(ship.angle, aim, ship.turnSpeed, dt);
+  ship.shootCD -= dt;
+  let dx = target.x - ship.x, dy = target.y - ship.y;
+  if (ship.shootCD > 0 || dx*dx + dy*dy > w.range * w.range) return;
+  let fx = ship.x + Math.cos(ship.angle) * w.muzzle;
+  let fy = ship.y + Math.sin(ship.angle) * w.muzzle;
+  fireProjectile(w.owner, fx, fy, ship.angle, w.projectile, ship.vx, ship.vy);
+  ship.shootCD = w.cdMin + Math.random() * w.cdSpan;
 }
 
 // Canonical four-axis thrust, applied in the ship's local frame. Every ship —
@@ -661,35 +686,16 @@ function updateEnemies(dt) {
     let espd = applyMovement(e, avoiding, drag, dt);
     if (espd > 30 && Math.random() < 0.4 && e.type !== 'bruiser') spawnExhaust(e, e.color);
 
-    // Kamikazes don't shoot; gunships only fire while charging
+    // Kamikazes don't shoot; drones don't fire during extend
     if (e.type === 'kamikaze') continue;
     if (e.type === 'drone' && e.attackState === 'extend') continue;
-    // Shooting — sometimes target a nearby ally instead
-    e.shootCD -= dt;
-    let shootTarget = { x: player.x, y: player.y, vx: player.vx, vy: player.vy };
+    // Target selection: player by default, coin-flip switch to a closer ally
+    let shootTarget = player;
     for (let a of allies) {
       let adx = a.x - e.x, ady = a.y - e.y;
-      let adist = Math.sqrt(adx*adx + ady*ady);
-      if (adist < dist && Math.random() < 0.5) {
-        shootTarget = a;
-      }
+      if (adx*adx + ady*ady < dist*dist && Math.random() < 0.5) shootTarget = a;
     }
-    let sDist = Math.sqrt((shootTarget.x-e.x)**2 + (shootTarget.y-e.y)**2);
-    // Smoothly aim nose at lead-shot point so projectiles fire straight ahead
-    let bSpeed = e.type === 'bruiser' ? 200 : 350;
-    let aimAngle = leadShot(e.x, e.y, e.vx, e.vy, shootTarget.x, shootTarget.y, shootTarget.vx, shootTarget.vy, bSpeed);
-    e.angle = turnToward(e.angle, aimAngle, e.turnSpeed, dt);
-    if (e.shootCD <= 0 && sDist < 800) {
-      let fx = e.x + Math.cos(e.angle)*20;
-      let fy = e.y + Math.sin(e.angle)*20;
-      if (e.type === 'bruiser') {
-        fireProjectile('enemy', fx, fy, e.angle, 'enemyMissile', e.vx, e.vy);
-        e.shootCD = 2 + Math.random();
-      } else {
-        fireProjectile('enemy', fx, fy, e.angle, 'enemyPlasma', e.vx, e.vy);
-        e.shootCD = e.type === 'gunship' ? 1.2 + Math.random()*0.5 : 0.4 + Math.random()*0.3;
-      }
-    }
+    aimAndShoot(e, shootTarget, dt);
   }
 }
 
@@ -714,18 +720,8 @@ function updateAllies(dt) {
     let avoiding = avoidPlanets(a, dt, target || player);
 
     if (target && !avoiding) {
-      // Smoothly aim nose at lead-shot point so projectiles fire straight ahead
-      let aimAngle = leadShot(a.x, a.y, a.vx, a.vy, target.x, target.y, target.vx, target.vy, 350);
-      a.angle = turnToward(a.angle, aimAngle, a.turnSpeed, dt);
       steerOrbit(a, target.x, target.y, tDist, dt);
-      // Shooting
-      a.shootCD -= dt;
-      if (a.shootCD <= 0 && tDist < 600) {
-        let fx = a.x + Math.cos(a.angle)*18;
-        let fy = a.y + Math.sin(a.angle)*18;
-        fireProjectile('ally', fx, fy, a.angle, 'plasma', a.vx, a.vy);
-        a.shootCD = 0.4 + Math.random() * 0.2;
-      }
+      aimAndShoot(a, target, dt);
     } else if (!avoiding) {
       // No enemies — drift near player
       let dx = player.x - a.x, dy = player.y - a.y;
