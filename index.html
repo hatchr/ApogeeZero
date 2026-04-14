@@ -246,9 +246,7 @@ function spawnAlly() {
     shootCD: Math.random() * 0.75 + 0.25,
     preferDist: 200 + Math.random() * 80,
     orbitDir: Math.random() < 0.5 ? 1 : -1, orbitStrength: 1.0, turnSpeed: 5,
-    // NOTE: bulletSpeed=350 but ally fires 'plasma' (speed 600). Pre-existing
-    // aim bug — ally over-leads. Preserved here; fix separately if desired.
-    weapon: { owner: 'ally', projectile: 'plasma', bulletSpeed: 350, range: 600, muzzle: 18, cdMin: 0.4, cdSpan: 0.2 }
+    weapon: { owner: 'ally', projectile: 'plasma', bulletSpeed: 600, range: 600, muzzle: 18, cdMin: 0.4, cdSpan: 0.2 }
   });
 }
 
