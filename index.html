@@ -603,11 +603,31 @@ function updateEnemies(dt) {
         e.vy += Math.sin(e.angle) * accel;
         if (dist < e.closeDist) e.attackState = 'break';
       } else if (e.attackState === 'break') {
-        // Smooth arc past player — turn away while thrusting forward
+        // AI pilots the break using the same four thrust axes the player has:
+        // W = fwd (×1.0), S = reverse (×0.5), A/D = strafe (×0.7). Identical
+        // physics — the drone just uses more buttons than during charge.
         let away = desiredAngle + Math.PI + Math.PI / 4 * e.strafeDir;
         e.angle = turnToward(e.angle, away, e.turnSpeed, dt);
-        e.vx += Math.cos(e.angle) * accel;
-        e.vy += Math.sin(e.angle) * accel;
+        let delta = away - e.angle;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        let cf = Math.cos(delta), sf = Math.sin(delta);
+        // Forward/reverse axis
+        if (cf > 0.1) {
+          e.vx += Math.cos(e.angle) * accel;
+          e.vy += Math.sin(e.angle) * accel;
+        } else if (cf < -0.1) {
+          e.vx -= Math.cos(e.angle) * accel * 0.5;
+          e.vy -= Math.sin(e.angle) * accel * 0.5;
+        }
+        // Strafe axis
+        if (sf > 0.1) {
+          e.vx += Math.cos(e.angle + Math.PI/2) * accel * 0.7;
+          e.vy += Math.sin(e.angle + Math.PI/2) * accel * 0.7;
+        } else if (sf < -0.1) {
+          e.vx += Math.cos(e.angle - Math.PI/2) * accel * 0.7;
+          e.vy += Math.sin(e.angle - Math.PI/2) * accel * 0.7;
+        }
         // Once heading away from player, extend out
         if (dx * e.vx + dy * e.vy < 0) e.attackState = 'extend';
       } else {
