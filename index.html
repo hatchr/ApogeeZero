@@ -354,23 +354,24 @@ function spawnExhaust(obj, color) {
   particles.push({ x: ex, y: ey, vx: Math.cos(a)*s + obj.vx*0.3, vy: Math.sin(a)*s + obj.vy*0.3, life: 0.2+Math.random()*0.15, maxLife: 0.35, color: color, size: 1.5+Math.random()*1.5 });
 }
 
-function fireProjectile(owner, x, y, angle, type, opts) {
+function fireProjectile(owner, x, y, angle, type, srcVx, srcVy, opts) {
   let p = { x, y, angle, owner, type };
+  let sx = srcVx || 0, sy = srcVy || 0;
   if (type === 'plasma') {
-    p.speed = 600; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
+    p.speed = 600; p.vx = Math.cos(angle)*p.speed + sx; p.vy = Math.sin(angle)*p.speed + sy;
     p.dmg = 10; p.radius = 3; p.life = 2; p.color = owner === 'enemy' ? '#f88' : owner === 'ally' ? '#4f8' : '#0ff';
     p.affectedByGravity = false;
   } else if (type === 'missile') {
-    p.speed = 300; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
+    p.speed = 300; p.vx = Math.cos(angle)*p.speed + sx; p.vy = Math.sin(angle)*p.speed + sy;
     p.dmg = 35; p.radius = 5; p.life = 3; p.color = owner === 'player' ? '#0f0' : '#f0f';
     p.affectedByGravity = true;
     if (opts && opts.homing) { p.homing = true; p.color = '#f60'; p.turnRate = 3.5; }
   } else if (type === 'enemyPlasma') {
-    p.speed = 350; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
+    p.speed = 350; p.vx = Math.cos(angle)*p.speed + sx; p.vy = Math.sin(angle)*p.speed + sy;
     p.dmg = 8; p.radius = 3; p.life = 2.5; p.color = '#f84';
     p.affectedByGravity = false;
   } else if (type === 'enemyMissile') {
-    p.speed = 200; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
+    p.speed = 200; p.vx = Math.cos(angle)*p.speed + sx; p.vy = Math.sin(angle)*p.speed + sy;
     p.dmg = 25; p.radius = 5; p.life = 3; p.color = '#f0f';
     p.affectedByGravity = true;
   }
@@ -555,11 +556,11 @@ function updatePlayer(dt) {
     let fx = player.x + Math.cos(player.angle)*20;
     let fy = player.y + Math.sin(player.angle)*20;
     if (spreadTimer > 0) {
-      fireProjectile('player', fx, fy, player.angle - 0.2, 'plasma');
-      fireProjectile('player', fx, fy, player.angle, 'plasma');
-      fireProjectile('player', fx, fy, player.angle + 0.2, 'plasma');
+      fireProjectile('player', fx, fy, player.angle - 0.2, 'plasma', player.vx, player.vy);
+      fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
+      fireProjectile('player', fx, fy, player.angle + 0.2, 'plasma', player.vx, player.vy);
     } else {
-      fireProjectile('player', fx, fy, player.angle, 'plasma');
+      fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
     }
     plasmaEnergy -= pCost;
     plasmaCD = 0.1;
@@ -567,7 +568,7 @@ function updatePlayer(dt) {
   if (rightDown && missileCD <= 0 && missileEnergy >= missileCost) {
     let fx = player.x + Math.cos(player.angle)*20;
     let fy = player.y + Math.sin(player.angle)*20;
-    fireProjectile('player', fx, fy, player.angle, 'missile', { homing: homingTimer > 0 });
+    fireProjectile('player', fx, fy, player.angle, 'missile', player.vx, player.vy, { homing: homingTimer > 0 });
     missileEnergy -= missileCost;
     missileCD = 0.5;
   }
@@ -668,10 +669,10 @@ function updateEnemies(dt) {
       let fx = e.x + Math.cos(e.angle)*20;
       let fy = e.y + Math.sin(e.angle)*20;
       if (e.type === 'bruiser') {
-        fireProjectile('enemy', fx, fy, e.angle, 'enemyMissile');
+        fireProjectile('enemy', fx, fy, e.angle, 'enemyMissile', e.vx, e.vy);
         e.shootCD = 2 + Math.random();
       } else {
-        fireProjectile('enemy', fx, fy, e.angle, 'enemyPlasma');
+        fireProjectile('enemy', fx, fy, e.angle, 'enemyPlasma', e.vx, e.vy);
         e.shootCD = e.type === 'gunship' ? 1.2 + Math.random()*0.5 : 0.4 + Math.random()*0.3;
       }
     }
@@ -708,7 +709,7 @@ function updateAllies(dt) {
       if (a.shootCD <= 0 && tDist < 600) {
         let fx = a.x + Math.cos(a.angle)*18;
         let fy = a.y + Math.sin(a.angle)*18;
-        fireProjectile('ally', fx, fy, a.angle, 'plasma');
+        fireProjectile('ally', fx, fy, a.angle, 'plasma', a.vx, a.vy);
         a.shootCD = 0.4 + Math.random() * 0.2;
       }
     } else if (!avoiding) {
