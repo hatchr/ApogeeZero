@@ -2,7 +2,7 @@
 
 **Ground rules**
 - This is for discussion only — do not act on anything yet.
-- Let’s focus on **one problem at a time**.
+- Let's focus on **one problem at a time**.
 - Identify **high‑impact fixes first**, then refine behavior and features.
 
 ---
@@ -21,7 +21,7 @@ These are ideas I believe are promising, listed in priority order.
 
 ## 2. Performance: Remaining Unknowns Worth Discussing
 
-These are areas where we **don’t yet know** the primary cause or best solution.
+These are areas where we **don't yet know** the primary cause or best solution.
 
 ### Gravity model & world complexity
 - Gravity is calculated from multiple planets/asteroids — is that still too expensive after plasma gravity is removed?
@@ -46,32 +46,25 @@ These are areas where we **don’t yet know** the primary cause or best solution
 
 ## 3. Enemy Navigation & Combat Behavior
 
-### Planet avoidance
-- Enemies often fly directly into planets when the planet is between them and the player.
-- Areas to discuss:
-  - Common steering / avoidance techniques used in similar games
-  - Local obstacle avoidance layered on top of current behavior
-  - Lightweight approaches that don’t significantly increase CPU cost
+### Planet avoidance ✅ IMPLEMENTED
+- ~~Enemies often fly directly into planets when the planet is between them and the player.~~
+- `avoidPlanets()` is implemented with quadratic urgency scaling, radial repulsion, and tangential steering to curve around planets toward a navigation target. Force magnitude is returned to suppress attack steering when avoidance is critical.
+- Applies to both enemies and allies.
 
-- Waypoints (speculative):
-  - Pre‑designed maps with navigation waypoints
-  - Procedurally generated waypoints at map creation
-  - (Pure brainstorming — no commitment)
-
-### Combat effectiveness (“Stormtrooper effect”)
-- A stationary player is often very safe.
-- Enemies orbit and spray projectiles but rarely hit.
-- It’s funny, but possibly too forgiving.
-- Discussion angles:
-  - Some ships prioritizing accuracy over evasion
+### Combat effectiveness ("Stormtrooper effect") ✅ IMPLEMENTED
+- ~~A stationary player is often very safe.~~
+- ~~Enemies orbit and spray projectiles but rarely hit.~~
+- `leadShot()` is implemented: enemies (and allies) solve a quadratic intercept equation using relative velocities to aim ahead of the player's position.
 
 ---
 
 ## 4. Feature Ideas (Explicitly Low Priority)
 
 ### Powerups
-- ✅ Temporary heat‑seeking missiles (done)
-- EMP that disables all ships temporarily (allies included)
+- Temporary heat‑seeking missiles ✅ IMPLEMENTED
+  - 12s powerup ("H", orange) — player missiles steer toward nearest enemy and missile recharge doubles while active.
+- EMP that disables all ships temporarily (allies included) ✅ IMPLEMENTED
+  - EMP disables all non-player ships (both enemies and allies) for 6s — they drift and spin helplessly.
 - Other ideas TBD
 
 ### World & structure
@@ -89,6 +82,7 @@ These are areas where we **don’t yet know** the primary cause or best solution
 ### Controls
 - Current control scheme is standard for this genre
 - Touch / screen controls for mobile remain an open design topic
+  - Mobile is detected (`isMobile` flag, reduced particle cap) but no touch event handlers are registered yet.
 
 ### Platform
 - Continue as browser‑based

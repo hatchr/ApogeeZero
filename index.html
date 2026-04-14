@@ -243,7 +243,7 @@ function spawnAlly() {
   allies.push({
     x: pos.x, y: pos.y, vx: 0, vy: 0, angle: 0,
     hp: 60, maxHp: 60, radius: 14, speed: 180,
-    shootCD: Math.random() * 1.5 + 0.5,
+    shootCD: Math.random() * 0.75 + 0.25,
     preferDist: 200 + Math.random() * 80,
     orbitDir: Math.random() < 0.5 ? 1 : -1, orbitStrength: 1.0, turnSpeed: 5
   });
@@ -624,7 +624,7 @@ function updateEnemies(dt) {
     }
 
     let espd = applyMovement(e, avoiding, drag, dt);
-    if (espd > 30 && Math.random() < 0.4) spawnExhaust(e, e.color);
+    if (espd > 30 && Math.random() < 0.4 && e.type !== 'bruiser') spawnExhaust(e, e.color);
 
     // Kamikazes don't shoot; gunships only fire while charging
     if (e.type === 'kamikaze') continue;
@@ -689,7 +689,7 @@ function updateAllies(dt) {
         let fx = a.x + Math.cos(a.angle)*18;
         let fy = a.y + Math.sin(a.angle)*18;
         fireProjectile('ally', fx, fy, a.angle, 'plasma');
-        a.shootCD = 0.8 + Math.random() * 0.4;
+        a.shootCD = 0.4 + Math.random() * 0.2;
       }
     } else if (!avoiding) {
       // No enemies — drift near player
