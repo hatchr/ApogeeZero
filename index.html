@@ -393,31 +393,56 @@ function leadShot(ex, ey, evx, evy, tx, ty, tvx, tvy, bulletSpeed) {
   return Math.atan2(dy + dvy*t, dx + dvx*t);
 }
 
-// Returns nonzero when avoidance is strong enough to suppress attack steering
+// Returns nonzero when avoidance is strong enough to suppress attack steering.
+// Ship rotates its nose toward an escape heading (radial + tangential bias)
+// and fires thrust using the player's W/S/A/D vocabulary. No world-frame cheats.
 function avoidPlanets(obj, dt, navTarget) {
-  let totalForce = 0;
+  let totalUrgency = 0;
+  let escX = 0, escY = 0;
   for (let pl of planets) {
     let dx = obj.x - pl.x, dy = obj.y - pl.y;
     let distSq = dx*dx + dy*dy;
     if (distSq >= pl.dangerZone * pl.dangerZone) continue;
     let dist = Math.sqrt(distSq);
-    let gravForce = pl.gravParam / (dist * dist);
     let urgency = (pl.dangerZone - dist) / pl.dangerMargin;
     urgency = urgency * urgency;
-    let avoidForce = gravForce + (gravForce + obj.speed * 2) * urgency;
+    if (urgency < 0.01) continue;
     let nx = dx / dist, ny = dy / dist;
-    obj.vx += nx * avoidForce * dt;
-    obj.vy += ny * avoidForce * dt;
-    // Tangential push — curve toward navTarget if provided, else follow velocity
+    // Tangent direction — curve toward navTarget if provided, else follow velocity
     let cross = navTarget
       ? nx * (navTarget.y - pl.y) - ny * (navTarget.x - pl.x)
       : obj.vx * ny - obj.vy * nx;
     let sign = cross >= 0 ? 1 : -1;
-    obj.vx += -ny * sign * avoidForce * 0.6 * dt;
-    obj.vy +=  nx * sign * avoidForce * 0.6 * dt;
-    if (urgency > 0.15) totalForce += avoidForce;
+    // Escape vector: radial away + 60% tangential bias, scaled by urgency
+    escX += (nx - ny * sign * 0.6) * urgency;
+    escY += (ny + nx * sign * 0.6) * urgency;
+    totalUrgency += urgency;
   }
-  return totalForce;
+  if (totalUrgency < 0.15) return 0;
+  // Flip and burn: rotate nose toward escape heading, then thrust using the
+  // same four axes the player has (W ×1.0, S ×0.5, A/D ×0.7).
+  let escAngle = Math.atan2(escY, escX);
+  obj.angle = turnToward(obj.angle, escAngle, obj.turnSpeed, dt);
+  let accel = obj.speed * dt * 2.0;
+  let delta = escAngle - obj.angle;
+  while (delta > Math.PI) delta -= Math.PI * 2;
+  while (delta < -Math.PI) delta += Math.PI * 2;
+  let cf = Math.cos(delta), sf = Math.sin(delta);
+  if (cf > 0.1) {
+    obj.vx += Math.cos(obj.angle) * accel;
+    obj.vy += Math.sin(obj.angle) * accel;
+  } else if (cf < -0.1) {
+    obj.vx -= Math.cos(obj.angle) * accel * 0.5;
+    obj.vy -= Math.sin(obj.angle) * accel * 0.5;
+  }
+  if (sf > 0.1) {
+    obj.vx += Math.cos(obj.angle + Math.PI/2) * accel * 0.7;
+    obj.vy += Math.sin(obj.angle + Math.PI/2) * accel * 0.7;
+  } else if (sf < -0.1) {
+    obj.vx += Math.cos(obj.angle - Math.PI/2) * accel * 0.7;
+    obj.vy += Math.sin(obj.angle - Math.PI/2) * accel * 0.7;
+  }
+  return totalUrgency;
 }
 
 function applyGravity(obj, dt) {
@@ -590,7 +615,7 @@ function updateEnemies(dt) {
 
     let avoiding = avoidPlanets(e, dt, player);
 
-    if (e.type === 'kamikaze') {
+    if (e.type === 'kamikaze' && !avoiding) {
       e.angle = turnToward(e.angle, desiredAngle, e.turnSpeed, dt);
       let accel = e.speed * dt * 2.5;
       e.vx += Math.cos(e.angle) * accel;
