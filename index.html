@@ -113,7 +113,7 @@ let score, wave, waveTimer, waveEnemiesLeft, enemiesAlive, lives;
 let gameRunning = false, gameOverActive = false;
 let lastTime = 0, plasmaCD = 0, missileCD = 0;
 let invincTimer = 0;
-let shieldTimer = 0, spreadTimer = 0, empTimer = 0;
+let shieldTimer = 0, spreadTimer = 0, empTimer = 0, homingTimer = 0;
 let empWave = 0, empWaveMax = 0;
 let plasmaEnergy = 100, plasmaMax = 100, plasmaRecharge = 15; // per second
 let missileEnergy = 100, missileMax = 100, missileRecharge = 8; // per second
@@ -141,7 +141,7 @@ function initGame() {
   score = 0; wave = 0; waveTimer = 2; waveEnemiesLeft = 0; enemiesAlive = 0;
   lives = 3; invincTimer = 0;
   plasmaCD = 0; missileCD = 0;
-  shieldTimer = 0; spreadTimer = 0; empTimer = 0; empWave = 0; empWaveMax = 0;
+  shieldTimer = 0; spreadTimer = 0; empTimer = 0; homingTimer = 0; empWave = 0; empWaveMax = 0;
   plasmaEnergy = plasmaMax; missileEnergy = missileMax;
   camX = 0; camY = 0;
   shakeX = 0; shakeY = 0; shakeDur = 0;
@@ -354,7 +354,7 @@ function spawnExhaust(obj, color) {
   particles.push({ x: ex, y: ey, vx: Math.cos(a)*s + obj.vx*0.3, vy: Math.sin(a)*s + obj.vy*0.3, life: 0.2+Math.random()*0.15, maxLife: 0.35, color: color, size: 1.5+Math.random()*1.5 });
 }
 
-function fireProjectile(owner, x, y, angle, type) {
+function fireProjectile(owner, x, y, angle, type, opts) {
   let p = { x, y, angle, owner, type };
   if (type === 'plasma') {
     p.speed = 600; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
@@ -364,6 +364,7 @@ function fireProjectile(owner, x, y, angle, type) {
     p.speed = 300; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
     p.dmg = 35; p.radius = 5; p.life = 3; p.color = owner === 'player' ? '#0f0' : '#f0f';
     p.affectedByGravity = true;
+    if (opts && opts.homing) { p.homing = true; p.color = '#f60'; p.turnRate = 3.5; }
   } else if (type === 'enemyPlasma') {
     p.speed = 350; p.vx = Math.cos(angle)*p.speed; p.vy = Math.sin(angle)*p.speed;
     p.dmg = 8; p.radius = 3; p.life = 2.5; p.color = '#f84';
@@ -540,8 +541,9 @@ function updatePlayer(dt) {
 
   // Recharge ammo
   let plasmaRate = spreadTimer > 0 ? plasmaRecharge * 6 : plasmaRecharge;
+  let missileRate = homingTimer > 0 ? missileRecharge * 2 : missileRecharge;
   plasmaEnergy = Math.min(plasmaMax, plasmaEnergy + plasmaRate * dt);
-  missileEnergy = Math.min(missileMax, missileEnergy + missileRecharge * dt);
+  missileEnergy = Math.min(missileMax, missileEnergy + missileRate * dt);
 
   // Slowly regenerate health
   player.hp = Math.min(player.maxHp, player.hp + 2 * dt);
@@ -565,7 +567,7 @@ function updatePlayer(dt) {
   if (rightDown && missileCD <= 0 && missileEnergy >= missileCost) {
     let fx = player.x + Math.cos(player.angle)*20;
     let fy = player.y + Math.sin(player.angle)*20;
-    fireProjectile('player', fx, fy, player.angle, 'missile');
+    fireProjectile('player', fx, fy, player.angle, 'missile', { homing: homingTimer > 0 });
     missileEnergy -= missileCost;
     missileCD = 0.5;
   }
@@ -708,6 +710,21 @@ function updateAllies(dt) {
 function updateProjectiles(dt) {
   for (let i = projectiles.length - 1; i >= 0; i--) {
     let p = projectiles[i];
+    // Heat-seeking — turn toward nearest enemy and re-align velocity
+    if (p.homing && enemies.length > 0) {
+      let best = null, bestD = Infinity;
+      for (let e of enemies) {
+        let dx = e.x - p.x, dy = e.y - p.y;
+        let d = dx*dx + dy*dy;
+        if (d < bestD) { bestD = d; best = e; }
+      }
+      if (best) {
+        let target = Math.atan2(best.y - p.y, best.x - p.x);
+        p.angle = turnToward(p.angle, target, p.turnRate, dt);
+        p.vx = Math.cos(p.angle) * p.speed;
+        p.vy = Math.sin(p.angle) * p.speed;
+      }
+    }
     p.x += p.vx * dt; p.y += p.vy * dt;
     p.life -= dt;
     // Trail
@@ -733,7 +750,7 @@ function updateProjectiles(dt) {
             spawnParticles(e.x, e.y, '#ff0', 10, 150);
             screenShake(0.15);
             if (Math.random() < 0.2) {
-              let types = ['health', 'shield', 'spread', 'emp'];
+              let types = ['health', 'shield', 'spread', 'emp', 'homing'];
               let t = types[Math.floor(Math.random() * types.length)];
               powerups.push({ x: e.x, y: e.y, vx: 0, vy: 0, type: t, life: 15, radius: 12 });
             }
@@ -908,6 +925,7 @@ function updatePowerups(dt) {
   if (shieldTimer > 0) shieldTimer -= dt;
   if (spreadTimer > 0) spreadTimer -= dt;
   if (empTimer > 0) empTimer -= dt;
+  if (homingTimer > 0) homingTimer -= dt;
 
   // Powerups — pickup and expire
   for (let i = powerups.length - 1; i >= 0; i--) {
@@ -935,6 +953,9 @@ function updatePowerups(dt) {
       } else if (pu.type === 'spread') {
         spreadTimer = 10;
         spawnParticles(pu.x, pu.y, '#f0f', 10, 80);
+      } else if (pu.type === 'homing') {
+        homingTimer = 12;
+        spawnParticles(pu.x, pu.y, '#f60', 10, 80);
       } else if (pu.type === 'emp') {
         empTimer = 6;
         // Assign random spin to all enemies and allies
@@ -1210,6 +1231,7 @@ function draw() {
     if (pu.type === 'health') { col = '#0f0'; symbol = '+'; }
     else if (pu.type === 'shield') { col = '#48f'; symbol = 'S'; }
     else if (pu.type === 'emp') { col = '#ff0'; symbol = 'E'; }
+    else if (pu.type === 'homing') { col = '#f60'; symbol = 'H'; }
     else { col = '#f0f'; symbol = '*'; }
     // Fading when about to expire
     ctx.globalAlpha = pu.life < 3 ? 0.3 + 0.7 * (pu.life / 3) : 1;
@@ -1365,6 +1387,14 @@ function drawHUD() {
     ctx.font = '14px Courier New';
     ctx.fillText('EMP ' + Math.ceil(empTimer) + 's', barX, puY);
     glow(0);
+    puY += 18;
+  }
+  if (homingTimer > 0) {
+    ctx.fillStyle = '#f60';
+    glow(6, '#f60');
+    ctx.font = '14px Courier New';
+    ctx.fillText('HOMING ' + Math.ceil(homingTimer) + 's', barX, puY);
+    glow(0);
   }
 
   // Radar
@@ -1430,7 +1460,7 @@ function drawHUD() {
   for (let a of allies) blip(a.x, a.y, '#0c6', 3);
   // Powerups
   for (let pu of powerups) {
-    let col = pu.type === 'health' ? '#0f0' : pu.type === 'shield' ? '#48f' : pu.type === 'emp' ? '#ff0' : '#f0f';
+    let col = pu.type === 'health' ? '#0f0' : pu.type === 'shield' ? '#48f' : pu.type === 'emp' ? '#ff0' : pu.type === 'homing' ? '#f60' : '#f0f';
     blip(pu.x, pu.y, col, 2);
   }
 

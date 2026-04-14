@@ -85,6 +85,7 @@ All ships rotate smoothly via `turnToward()`. Enemies aim at lead-shot direction
 - **Shield** (8s invulnerability, blue "S")
 - **Spread Shot** (10s triple plasma + 6x recharge, magenta "*")
 - **EMP** (6s disables all non-player ships — they drift and spin helplessly, yellow "E", expanding shockwave animation)
+- **Homing** (12s — player missiles steer toward nearest enemy + 2x missile recharge, orange "H", missiles render orange while homing)
 
 Powerups gravitate toward the player from any distance (inverse-square pull).
 
@@ -95,4 +96,4 @@ Powerups gravitate toward the player from any distance (inverse-square pull).
 
 ### Ammo
 - Plasma: 100 energy, costs 5/shot (15 for spread), recharges 15/sec (90/sec during spread)
-- Missiles: 100 energy, costs 20/shot, recharges 8/sec
+- Missiles: 100 energy, costs 20/shot, recharges 8/sec (16/sec during homing)

@@ -70,7 +70,7 @@ These are areas where we **don’t yet know** the primary cause or best solution
 ## 4. Feature Ideas (Explicitly Low Priority)
 
 ### Powerups
-- Temporary heat‑seeking missiles
+- ✅ Temporary heat‑seeking missiles (done)
 - EMP that disables all ships temporarily (allies included)
 - Other ideas TBD
 
