@@ -32,8 +32,8 @@ Open index.html in a browser. Click canvas to engage pointer lock.
 - `turnToward(current, target, rate, dt)` — smooth angle rotation
 - `damagePlayer(amount)` — centralized player hp/death/respawn
 - `handlePlanetCollision(obj, pl)` — shared bounce/damage for any entity vs planet
-- `avoidPlanets(obj, dt)` — AI steering away from planets, returns force applied
-- `fireProjectile()`, `leadShot()` — weapon and aim-ahead math
+- `avoidPlanets(obj, dt, navTarget)` — AI steering away from planets; rotates nose toward escape heading (radial away + 60% tangential bias) and applies W/S/A/D thrust. Returns total urgency (0 if below threshold) so callers suppress attack steering.
+- `fireProjectile(owner, x, y, angle, type, srcVx, srcVy, opts)`, `leadShot()` — weapon and aim-ahead math. Projectiles inherit the shooter's velocity on launch.
 
 ### Update sub-functions (~lines 370-870)
 - `updatePhysics(dt)` — gravity, planet collisions for all entities
@@ -60,13 +60,23 @@ Open index.html in a browser. Click canvas to engage pointer lock.
 
 ## Game systems
 
+### Physics (uniform across all ships)
+
+**Design principle: AIs do not cheat physics.** Enemies and allies are bound by the same movement rules as the player. They have the same thrust vocabulary, the same per-frame damping application, and the same constraint that force can only be applied in the ship's local frame. Per-class parameters (thrust magnitude, turn speed, mass-equivalent drag coefficient) can differ — different ships have different engines — but the *rules* are identical. When adding new AI behavior, it must be expressible as "which buttons to press and when," not as direct velocity or position manipulation.
+
+- All ships (player, enemies, allies) use the same thrust vocabulary: **W ×1.0 forward, S ×0.5 reverse, A/D ×0.7 strafe** — applied in the ship's local frame. AIs pick which axes to fire based on desired heading; the player presses keys.
+- Damping: player retains velocity at `0.99^(dt*60)` per second (~55%/s); enemies and allies at `0.98^(dt*60)` (~30%/s). (Different coefficients per class are allowed; they represent different ship mass/aero, not a rule exception.)
+- Projectiles inherit the shooter's velocity at launch. `leadShot()` already assumes this frame, so enemy aim is consistent with actual projectile motion.
+- `avoidPlanets()` is fully physics-consistent (flip-and-burn). Slow-turning ships can occasionally eat planets — intentional.
+- ⚠️ **Known exception to the principle:** `steerOrbit()` applies world-frame forces independent of ship facing. Used by gunships, bruisers, and orbiting allies. Kept for combat feel, but flagged as a cheat to address later if the principle tightens.
+
 ### Enemies (4 types)
-- **Drone**: fast, low hp, weak shots, red — strafing runs (charge/break/extend)
+- **Drone**: fast, low hp, weak shots, red — strafing runs (charge/break/extend). Break state uses full four-axis W/S/A/D thrust to flip-and-burn past the player without ramming.
 - **Gunship**: medium, orbits at preferred distance, orange
 - **Bruiser**: slow, tanky, fires missiles, purple/hexagonal
 - **Kamikaze**: very fast, fragile, yellow-green — charges and explodes on contact, slow turning (1 rad/s)
 
-All ships rotate smoothly via `turnToward()`. Enemies aim at lead-shot direction and fire straight from their nose.
+All ships rotate smoothly via `turnToward()`. Enemies aim at lead-shot direction and fire straight from their nose. Kamikazes defer to `avoidPlanets` when near planet danger zones (can't ram through terrain).
 
 ### Allies
 - Same ship shape as player, green tint
