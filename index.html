@@ -281,31 +281,27 @@ function spawnEnemy() {
     else if (roll < 0.85) type = 'bruiser';
     else type = 'kamikaze';
   }
-  let e = { x: pos.x, y: pos.y, vx: 0, vy: 0, angle: 0, type, radius: 14, shootCD: Math.random() * 2 + 1 };
+  let def = ENEMY_DEFS[type];
+  let hp = def.baseHp + diff * def.hpScale;
+  let e = {
+    x: pos.x, y: pos.y, vx: 0, vy: 0, angle: 0, type,
+    radius: def.radius, shootCD: Math.random() * 2 + 1,
+    hp, maxHp: hp, speed: def.baseSpeed + diff * def.speedScale,
+    color: def.color, accent: def.accent, dmg: def.dmg, score: def.score,
+    turnSpeed: def.turnSpeed, behavior: def.behavior,
+    exhaustColor: def.exhaustColor, weapon: def.weapon,
+  };
   if (type === 'drone') {
-    e.hp = 20 + diff * 3; e.maxHp = e.hp; e.speed = 220 + diff * 5; e.color = '#f44'; e.accent = '#f88'; e.dmg = 8; e.score = 100; e.radius = 12;
-    e.attackState = 'charge'; e.closeDist = 150 + Math.random() * 50; e.farDist = 500 + Math.random() * 100;
-    e.strafeDir = Math.random() < 0.5 ? 1 : -1; e.turnSpeed = 6;
-    e.weapon = { owner: 'enemy', projectile: 'enemyPlasma', bulletSpeed: 350, range: 800, muzzle: 20, cdMin: 0.4, cdSpan: 0.3 };
-    e.behavior = droneAI; e.exhaustColor = e.color;
-  } else if (type === 'gunship') {
-    e.hp = 50 + diff * 5; e.maxHp = e.hp; e.speed = 150 + diff * 3; e.color = '#f80'; e.accent = '#fc4'; e.dmg = 12; e.score = 250; e.radius = 16;
-    e.preferDist = 180 + Math.random() * 80;
-    e.orbitDir = Math.random() < 0.5 ? 1 : -1; e.orbitStrength = 1.0; e.turnSpeed = 4;
-    e.weapon = { owner: 'enemy', projectile: 'enemyPlasma', bulletSpeed: 350, range: 800, muzzle: 20, cdMin: 1.2, cdSpan: 0.5 };
-    e.behavior = orbiterAI; e.exhaustColor = e.color;
-  } else if (type === 'bruiser') {
-    e.hp = 120 + diff * 10; e.maxHp = e.hp; e.speed = 80 + diff * 2; e.color = '#a0f'; e.accent = '#c6f'; e.dmg = 25; e.score = 500; e.radius = 22;
-    e.preferDist = 320 + Math.random() * 100;
-    e.orbitDir = Math.random() < 0.5 ? 1 : -1; e.orbitStrength = 0.6; e.turnSpeed = 3;
-    e.weapon = { owner: 'enemy', projectile: 'enemyMissile', bulletSpeed: 200, range: 800, muzzle: 20, cdMin: 2, cdSpan: 1 };
-    e.behavior = orbiterAI; e.exhaustColor = null;
+    e.attackState = 'charge';
+    e.closeDist = 150 + Math.random() * 50;
+    e.farDist   = 500 + Math.random() * 100;
+    e.strafeDir = Math.random() < 0.5 ? 1 : -1;
+  } else if (type === 'gunship' || type === 'bruiser') {
+    e.preferDist    = def.preferDistBase + Math.random() * def.preferDistRand;
+    e.orbitDir      = Math.random() < 0.5 ? 1 : -1;
+    e.orbitStrength = def.orbitStrength;
   } else {
-    // Kamikaze — fast, fragile, charges and explodes on contact (no weapon)
-    e.hp = 15 + diff * 2; e.maxHp = e.hp; e.speed = 300 + diff * 8; e.color = '#cf0'; e.accent = '#ff0'; e.dmg = 30; e.score = 150; e.radius = 10;
-    e.preferDist = 0;
-    e.orbitDir = 0; e.turnSpeed = 1;
-    e.behavior = kamikazeAI; e.exhaustColor = e.color;
+    e.preferDist = 0; e.orbitDir = 0;
   }
   enemies.push(e);
   enemiesAlive++;
@@ -392,27 +388,58 @@ function spawnExhaust(obj, color) {
   addParticle({ x: ex, y: ey, vx: Math.cos(a)*s + obj.vx*0.3, vy: Math.sin(a)*s + obj.vy*0.3, life: 0.2+Math.random()*0.15, maxLife: 0.35, color: color, size: 1.5+Math.random()*1.5 });
 }
 
+const PROJECTILE_DEFS = {
+  plasma:       { speed: 600, dmg: 10, radius: 3, life: 2,   affectedByGravity: false, color: '#0ff' },
+  missile:      { speed: 300, dmg: 35, radius: 5, life: 3,   affectedByGravity: true,  color: '#0f0' },
+  enemyPlasma:  { speed: 350, dmg: 8,  radius: 3, life: 2.5, affectedByGravity: false, color: '#f84' },
+  enemyMissile: { speed: 200, dmg: 25, radius: 5, life: 3,   affectedByGravity: true,  color: '#f0f' },
+};
+
+const POWERUP_DEFS = {
+  health: { color: '#0f0', symbol: '+' },
+  shield: { color: '#48f', symbol: 'S' },
+  emp:    { color: '#ff0', symbol: 'E' },
+  homing: { color: '#f60', symbol: 'H' },
+  spread: { color: '#f0f', symbol: '*' },
+};
+
+const ENEMY_DEFS = {
+  drone: {
+    baseHp: 20, hpScale: 3, baseSpeed: 220, speedScale: 5,
+    color: '#f44', accent: '#f88', dmg: 8, score: 100, radius: 12, turnSpeed: 6,
+    weapon: { owner: 'enemy', projectile: 'enemyPlasma', bulletSpeed: 350, range: 800, muzzle: 20, cdMin: 0.4, cdSpan: 0.3 },
+    behavior: droneAI, exhaustColor: '#f44',
+  },
+  gunship: {
+    baseHp: 50, hpScale: 5, baseSpeed: 150, speedScale: 3,
+    color: '#f80', accent: '#fc4', dmg: 12, score: 250, radius: 16, turnSpeed: 4,
+    preferDistBase: 180, preferDistRand: 80, orbitStrength: 1.0,
+    weapon: { owner: 'enemy', projectile: 'enemyPlasma', bulletSpeed: 350, range: 800, muzzle: 20, cdMin: 1.2, cdSpan: 0.5 },
+    behavior: orbiterAI, exhaustColor: '#f80',
+  },
+  bruiser: {
+    baseHp: 120, hpScale: 10, baseSpeed: 80, speedScale: 2,
+    color: '#a0f', accent: '#c6f', dmg: 25, score: 500, radius: 22, turnSpeed: 3,
+    preferDistBase: 320, preferDistRand: 100, orbitStrength: 0.6,
+    weapon: { owner: 'enemy', projectile: 'enemyMissile', bulletSpeed: 200, range: 800, muzzle: 20, cdMin: 2, cdSpan: 1 },
+    behavior: orbiterAI, exhaustColor: null,
+  },
+  kamikaze: {
+    baseHp: 15, hpScale: 2, baseSpeed: 300, speedScale: 8,
+    color: '#cf0', accent: '#ff0', dmg: 30, score: 150, radius: 10, turnSpeed: 1,
+    behavior: kamikazeAI, exhaustColor: '#cf0',
+  },
+};
+
 function fireProjectile(owner, x, y, angle, type, srcVx, srcVy, opts) {
-  let p = { x, y, angle, owner, type };
+  let def = PROJECTILE_DEFS[type];
   let sx = srcVx || 0, sy = srcVy || 0;
-  if (type === 'plasma') {
-    p.speed = 600; p.vx = Math.cos(angle)*p.speed + sx; p.vy = Math.sin(angle)*p.speed + sy;
-    p.dmg = 10; p.radius = 3; p.life = 2; p.color = owner === 'enemy' ? '#f88' : owner === 'ally' ? '#4f8' : '#0ff';
-    p.affectedByGravity = false;
-  } else if (type === 'missile') {
-    p.speed = 300; p.vx = Math.cos(angle)*p.speed + sx; p.vy = Math.sin(angle)*p.speed + sy;
-    p.dmg = 35; p.radius = 5; p.life = 3; p.color = owner === 'player' ? '#0f0' : '#f0f';
-    p.affectedByGravity = true;
-    if (opts && opts.homing) { p.homing = true; p.color = '#f60'; p.turnRate = 3.5; }
-  } else if (type === 'enemyPlasma') {
-    p.speed = 350; p.vx = Math.cos(angle)*p.speed + sx; p.vy = Math.sin(angle)*p.speed + sy;
-    p.dmg = 8; p.radius = 3; p.life = 2.5; p.color = '#f84';
-    p.affectedByGravity = false;
-  } else if (type === 'enemyMissile') {
-    p.speed = 200; p.vx = Math.cos(angle)*p.speed + sx; p.vy = Math.sin(angle)*p.speed + sy;
-    p.dmg = 25; p.radius = 5; p.life = 3; p.color = '#f0f';
-    p.affectedByGravity = true;
-  }
+  let p = { x, y, angle, owner, type, ...def,
+            vx: Math.cos(angle) * def.speed + sx,
+            vy: Math.sin(angle) * def.speed + sy };
+  if (type === 'plasma' && owner !== 'player') p.color = owner === 'ally' ? '#4f8' : '#f88';
+  if (type === 'missile' && owner !== 'player') p.color = '#f0f';
+  if (opts && opts.homing) { p.homing = true; p.color = '#f60'; p.turnRate = 3.5; }
   projectiles.push(p);
 }
 
@@ -1299,12 +1326,7 @@ function draw() {
   // Powerups
   for (let pu of powerups) {
     let bob = Math.sin(Date.now() * 0.005) * 3;
-    let col, symbol;
-    if (pu.type === 'health') { col = '#0f0'; symbol = '+'; }
-    else if (pu.type === 'shield') { col = '#48f'; symbol = 'S'; }
-    else if (pu.type === 'emp') { col = '#ff0'; symbol = 'E'; }
-    else if (pu.type === 'homing') { col = '#f60'; symbol = 'H'; }
-    else { col = '#f0f'; symbol = '*'; }
+    let { color: col, symbol } = POWERUP_DEFS[pu.type];
     // Fading when about to expire
     ctx.globalAlpha = pu.life < 3 ? 0.3 + 0.7 * (pu.life / 3) : 1;
     glow(6, col);
@@ -1437,36 +1459,18 @@ function drawHUD() {
 
   // Active powerup indicators
   let puY = missBarY + 8 + 36;
-  if (shieldTimer > 0) {
-    ctx.fillStyle = '#48f';
-    glow(6, '#48f');
-    ctx.font = '14px Courier New';
-    ctx.fillText('SHIELD ' + Math.ceil(shieldTimer) + 's', barX, puY);
+  ctx.font = '14px Courier New';
+  for (let [timer, key] of [
+    [shieldTimer, 'shield'], [spreadTimer, 'spread'],
+    [empTimer,    'emp'],    [homingTimer, 'homing'],
+  ]) {
+    if (timer <= 0) continue;
+    let { color } = POWERUP_DEFS[key];
+    ctx.fillStyle = color;
+    glow(6, color);
+    ctx.fillText(key.toUpperCase() + ' ' + Math.ceil(timer) + 's', barX, puY);
     glow(0);
     puY += 18;
-  }
-  if (spreadTimer > 0) {
-    ctx.fillStyle = '#f0f';
-    glow(6, '#f0f');
-    ctx.font = '14px Courier New';
-    ctx.fillText('SPREAD ' + Math.ceil(spreadTimer) + 's', barX, puY);
-    glow(0);
-    puY += 18;
-  }
-  if (empTimer > 0) {
-    ctx.fillStyle = '#ff0';
-    glow(6, '#ff0');
-    ctx.font = '14px Courier New';
-    ctx.fillText('EMP ' + Math.ceil(empTimer) + 's', barX, puY);
-    glow(0);
-    puY += 18;
-  }
-  if (homingTimer > 0) {
-    ctx.fillStyle = '#f60';
-    glow(6, '#f60');
-    ctx.font = '14px Courier New';
-    ctx.fillText('HOMING ' + Math.ceil(homingTimer) + 's', barX, puY);
-    glow(0);
   }
 
   // Radar
@@ -1532,7 +1536,7 @@ function drawHUD() {
   for (let a of allies) blip(a.x, a.y, '#0c6', 3);
   // Powerups
   for (let pu of powerups) {
-    let col = pu.type === 'health' ? '#0f0' : pu.type === 'shield' ? '#48f' : pu.type === 'emp' ? '#ff0' : pu.type === 'homing' ? '#f60' : '#f0f';
+    let col = POWERUP_DEFS[pu.type].color;
     blip(pu.x, pu.y, col, 2);
   }
 
