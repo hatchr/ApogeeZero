@@ -138,8 +138,8 @@ function makeStars() {
 function initGame() {
   player = { x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, hp: 100, maxHp: 100, radius: 16 };
   enemies = []; projectiles = []; particles = []; powerups = []; allies = [];
-  score = 0; wave = 4; waveTimer = 2; waveEnemiesLeft = 0; enemiesAlive = 0; // TEST: wave=4 → nextWave bumps to 5
-  lives = 99; invincTimer = 0; // TEST: 99 lives
+  score = 0; wave = 0; waveTimer = 2; waveEnemiesLeft = 0; enemiesAlive = 0;
+  lives = 3; invincTimer = 0;
   plasmaCD = 0; missileCD = 0;
   shieldTimer = 0; spreadTimer = 0; empTimer = 0; homingTimer = 0; empWave = 0; empWaveMax = 0;
   plasmaEnergy = plasmaMax; missileEnergy = missileMax;
