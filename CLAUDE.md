@@ -22,37 +22,48 @@ Open index.html in a browser. Click canvas to engage pointer lock.
 
 ## Code structure (inside `<script>`)
 
-### State & setup (~lines 78-200)
+### State & setup
 - Global state variables, input handlers, pointer lock
 - `initGame()`, `makeStars()`, `makePlanets()`, `nextWave()`
 - `spawnEnemy()`, `spawnAlly()`, `safeSpawnPoint()`
 
-### Shared helpers (~lines 262-370)
+### Shared helpers
 - `screenShake()`, `spawnParticles()`, `spawnExhaust()`
 - `turnToward(current, target, rate, dt)` — smooth angle rotation
 - `damagePlayer(amount)` — centralized player hp/death/respawn
 - `handlePlanetCollision(obj, pl)` — shared bounce/damage for any entity vs planet
-- `avoidPlanets(obj, dt, navTarget)` — AI steering away from planets; rotates nose toward escape heading (radial away + 60% tangential bias) and applies W/S/A/D thrust. Returns total urgency (0 if below threshold) so callers suppress attack steering.
+- `thrustLocal(obj, f, s, accel)` — canonical W/S/A/D thrust in ship's local frame (W ×1.0, S ×0.5, A/D ×0.7). Every ship uses this.
+- `thrustToward(obj, heading, accel)` — AI helper; picks W/S from cos(delta), A/D from sin(delta), then calls `thrustLocal`.
+- `avoidPlanets(obj, dt, navTarget)` — AI planet escape; rotates nose toward escape heading (radial away + 60% tangential bias) and calls `thrustToward`. Returns total urgency (0 if below threshold) so callers suppress attack steering.
 - `fireProjectile(owner, x, y, angle, type, srcVx, srcVy, opts)`, `leadShot()` — weapon and aim-ahead math. Projectiles inherit the shooter's velocity on launch.
+- `aimAndShoot(ship, target, dt)` — shared for enemies + allies. Reads `ship.weapon` (owner/projectile/bulletSpeed/range/muzzle/cdMin/cdSpan) attached at spawn. Caller picks target; mechanics are uniform.
 
-### Update sub-functions (~lines 370-870)
+### NPC behaviors
+Each NPC has a `behavior(ship, dt)` function attached at spawn. The shared `updateNPCs` loop handles EMP drift, `applyMovement`, and exhaust uniformly; per-ship AI lives in its behavior.
+
+- `kamikazeAI` — ram the player; no shooting
+- `droneAI` — charge/break/extend state machine; calls `aimAndShoot` during charge/break
+- `orbiterAI` — shared by gunship + bruiser (identical behavior, different weapon + orbit params)
+- `allyAI` — find nearest enemy, orbit + `aimAndShoot`; drift toward player if no enemies
+- `pickEnemyShootTarget(e, distToPlayer)` — helper; coin-flip between player and a closer ally
+
+### Update sub-functions
 - `updatePhysics(dt)` — gravity, planet collisions for all entities
-- `updatePlayer(dt)` — input, thrust, ammo recharge, shooting, health regen
-- `updateEnemies(dt)` — enemy AI (strafing/orbit, shoot, planet avoidance, EMP disable)
-- `updateAllies(dt)` — ally AI (target nearest enemy, orbit, shoot, EMP disable)
+- `updatePlayer(dt)` — input, thrust, ammo recharge, shooting, health regen (player stays separate — mouse rotation, spread shot, homing missiles, ammo energy system, HP regen, blue engine particles don't fit the NPC mold)
+- `updateNPCs(dt)` — unified enemy + ally loop; EMP drift, `ship.behavior(ship, dt)`, movement, exhaust
 - `updateProjectiles(dt)` — movement, trails, all projectile-vs-entity hits
 - `updateCollisions(dt)` — body-to-body: enemy-player, ally-player, ally-enemy
 - `updatePowerups(dt)` — timers, pickup logic, powerup gravity toward player
 - `updateParticles(dt)` — movement, cleanup
 - `update(dt)` — orchestrator calling the above + wave spawning + camera + EMP shockwave
 
-### Rendering (~lines 870-1210)
+### Rendering
 - `drawShip()` — procedural ship shapes (player/ally arrow, drone triangle, gunship diamond, bruiser hexagon)
 - `drawBar()` — reusable neon HUD bar
 - `draw()` — stars, planets, particles, projectiles, powerups, ships, shield, EMP shockwave, HUD
 - `drawHUD()` — HP/plasma/missile bars, lives, score, wave, active powerups
 
-### Game flow (~lines 1210-1280)
+### Game flow
 - `gameOver()` — releases pointer lock, hides save UI for non-qualifying scores
 - `showLeaderboard()`
 - Event listeners for start/restart/submit score

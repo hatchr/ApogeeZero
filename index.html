@@ -138,8 +138,8 @@ function makeStars() {
 function initGame() {
   player = { x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, hp: 100, maxHp: 100, radius: 16 };
   enemies = []; projectiles = []; particles = []; powerups = []; allies = [];
-  score = 0; wave = 0; waveTimer = 2; waveEnemiesLeft = 0; enemiesAlive = 0;
-  lives = 3; invincTimer = 0;
+  score = 0; wave = 4; waveTimer = 2; waveEnemiesLeft = 0; enemiesAlive = 0; // TEST: wave=4 → nextWave bumps to 5
+  lives = 99; invincTimer = 0; // TEST: 99 lives
   plasmaCD = 0; missileCD = 0;
   shieldTimer = 0; spreadTimer = 0; empTimer = 0; homingTimer = 0; empWave = 0; empWaveMax = 0;
   plasmaEnergy = plasmaMax; missileEnergy = missileMax;
@@ -246,7 +246,8 @@ function spawnAlly() {
     shootCD: Math.random() * 0.75 + 0.25,
     preferDist: 200 + Math.random() * 80,
     orbitDir: Math.random() < 0.5 ? 1 : -1, orbitStrength: 1.0, turnSpeed: 5,
-    weapon: { owner: 'ally', projectile: 'plasma', bulletSpeed: 600, range: 600, muzzle: 18, cdMin: 0.4, cdSpan: 0.2 }
+    weapon: { owner: 'ally', projectile: 'plasma', bulletSpeed: 600, range: 600, muzzle: 18, cdMin: 0.4, cdSpan: 0.2 },
+    behavior: allyAI, exhaustColor: '#0af'
   });
 }
 
@@ -271,21 +272,25 @@ function spawnEnemy() {
     e.attackState = 'charge'; e.closeDist = 150 + Math.random() * 50; e.farDist = 500 + Math.random() * 100;
     e.strafeDir = Math.random() < 0.5 ? 1 : -1; e.turnSpeed = 6;
     e.weapon = { owner: 'enemy', projectile: 'enemyPlasma', bulletSpeed: 350, range: 800, muzzle: 20, cdMin: 0.4, cdSpan: 0.3 };
+    e.behavior = droneAI; e.exhaustColor = e.color;
   } else if (type === 'gunship') {
     e.hp = 50 + diff * 5; e.maxHp = e.hp; e.speed = 150 + diff * 3; e.color = '#f80'; e.accent = '#fc4'; e.dmg = 12; e.score = 250; e.radius = 16;
     e.preferDist = 180 + Math.random() * 80;
     e.orbitDir = Math.random() < 0.5 ? 1 : -1; e.orbitStrength = 1.0; e.turnSpeed = 4;
     e.weapon = { owner: 'enemy', projectile: 'enemyPlasma', bulletSpeed: 350, range: 800, muzzle: 20, cdMin: 1.2, cdSpan: 0.5 };
+    e.behavior = orbiterAI; e.exhaustColor = e.color;
   } else if (type === 'bruiser') {
     e.hp = 120 + diff * 10; e.maxHp = e.hp; e.speed = 80 + diff * 2; e.color = '#a0f'; e.accent = '#c6f'; e.dmg = 25; e.score = 500; e.radius = 22;
     e.preferDist = 320 + Math.random() * 100;
     e.orbitDir = Math.random() < 0.5 ? 1 : -1; e.orbitStrength = 0.6; e.turnSpeed = 3;
     e.weapon = { owner: 'enemy', projectile: 'enemyMissile', bulletSpeed: 200, range: 800, muzzle: 20, cdMin: 2, cdSpan: 1 };
+    e.behavior = orbiterAI; e.exhaustColor = null;
   } else {
     // Kamikaze — fast, fragile, charges and explodes on contact (no weapon)
     e.hp = 15 + diff * 2; e.maxHp = e.hp; e.speed = 300 + diff * 8; e.color = '#cf0'; e.accent = '#ff0'; e.dmg = 30; e.score = 150; e.radius = 10;
     e.preferDist = 0;
     e.orbitDir = 0; e.turnSpeed = 1;
+    e.behavior = kamikazeAI; e.exhaustColor = e.color;
   }
   enemies.push(e);
   enemiesAlive++;
@@ -631,108 +636,121 @@ function updatePlayer(dt) {
   }
 }
 
-function updateEnemies(dt) {
-  let drag = Math.pow(0.98, dt * 60);
-  for (let e of enemies) {
-    // EMP: no AI, no drag, just drift and spin
-    if (empTimer > 0) {
-      e.angle += (e.spinRate || 0) * dt;
-      e.x += e.vx * dt;
-      e.y += e.vy * dt;
-      continue;
-    }
-    let dx = player.x - e.x, dy = player.y - e.y;
-    let dist = Math.sqrt(dx*dx + dy*dy);
-    let desiredAngle = Math.atan2(dy, dx);
+// ---------- NPC behaviors ----------
+// Each behavior is "what does this ship want to do this frame?" — it sets
+// velocity/angle intent via the shared thrust helpers, and sets ship._avoiding
+// so the outer loop knows whether to bypass the speed cap in applyMovement.
+// The outer loop handles EMP, movement integration, and exhaust uniformly.
 
-    let avoiding = avoidPlanets(e, dt, player);
+// Enemy target pick: player by default; coin-flip switch to a closer ally.
+function pickEnemyShootTarget(e, distToPlayer) {
+  let target = player;
+  for (let a of allies) {
+    let adx = a.x - e.x, ady = a.y - e.y;
+    if (adx*adx + ady*ady < distToPlayer*distToPlayer && Math.random() < 0.5) target = a;
+  }
+  return target;
+}
 
-    if (e.type === 'kamikaze' && !avoiding) {
+// Kamikaze: ram the player. No shooting.
+function kamikazeAI(e, dt) {
+  let dx = player.x - e.x, dy = player.y - e.y;
+  e._avoiding = avoidPlanets(e, dt, player);
+  if (e._avoiding) return;
+  e.angle = turnToward(e.angle, Math.atan2(dy, dx), e.turnSpeed, dt);
+  let accel = e.speed * dt * 2.5;
+  e.vx += Math.cos(e.angle) * accel;
+  e.vy += Math.sin(e.angle) * accel;
+}
+
+// Drone: strafing run — charge in, break past, extend out, loop back.
+function droneAI(e, dt) {
+  let dx = player.x - e.x, dy = player.y - e.y;
+  let dist = Math.sqrt(dx*dx + dy*dy);
+  let desiredAngle = Math.atan2(dy, dx);
+  e._avoiding = avoidPlanets(e, dt, player);
+  if (!e._avoiding) {
+    let accel = e.speed * dt * 2.0;
+    if (e.attackState === 'charge') {
       e.angle = turnToward(e.angle, desiredAngle, e.turnSpeed, dt);
-      let accel = e.speed * dt * 2.5;
       e.vx += Math.cos(e.angle) * accel;
       e.vy += Math.sin(e.angle) * accel;
-    } else if (e.type === 'drone' && !avoiding) {
-      // Strafing run: charge in, curve past, fly out, loop back
-      let accel = e.speed * dt * 2.0;
-      if (e.attackState === 'charge') {
-        e.angle = turnToward(e.angle, desiredAngle, e.turnSpeed, dt);
-        e.vx += Math.cos(e.angle) * accel;
-        e.vy += Math.sin(e.angle) * accel;
-        if (dist < e.closeDist) e.attackState = 'break';
-      } else if (e.attackState === 'break') {
-        // AI pilots the break using the same four thrust axes the player has.
-        // Identical physics — the drone just uses more buttons than during charge.
-        let away = desiredAngle + Math.PI + Math.PI / 4 * e.strafeDir;
-        e.angle = turnToward(e.angle, away, e.turnSpeed, dt);
-        thrustToward(e, away, accel);
-        // Once heading away from player, extend out
-        if (dx * e.vx + dy * e.vy < 0) e.attackState = 'extend';
-      } else {
-        // Extend — keep flying in current direction, gradually straighten out
-        let away = Math.atan2(-dy, -dx);
-        e.angle = turnToward(e.angle, away, e.turnSpeed * 0.5, dt);
-        e.vx += Math.cos(e.angle) * accel * 0.5;
-        e.vy += Math.sin(e.angle) * accel * 0.5;
-        if (dist > e.farDist) { e.attackState = 'charge'; e.strafeDir *= -1; }
-      }
-    } else if (!avoiding) {
-      e.angle = turnToward(e.angle, desiredAngle, e.turnSpeed, dt);
-      steerOrbit(e, player.x, player.y, dist, dt);
+      if (dist < e.closeDist) e.attackState = 'break';
+    } else if (e.attackState === 'break') {
+      // Full W/S/A/D vocabulary — just uses more buttons than charge.
+      let away = desiredAngle + Math.PI + Math.PI / 4 * e.strafeDir;
+      e.angle = turnToward(e.angle, away, e.turnSpeed, dt);
+      thrustToward(e, away, accel);
+      if (dx * e.vx + dy * e.vy < 0) e.attackState = 'extend';
+    } else {
+      // Extend — keep flying out, gradually straighten.
+      let away = Math.atan2(-dy, -dx);
+      e.angle = turnToward(e.angle, away, e.turnSpeed * 0.5, dt);
+      e.vx += Math.cos(e.angle) * accel * 0.5;
+      e.vy += Math.sin(e.angle) * accel * 0.5;
+      if (dist > e.farDist) { e.attackState = 'charge'; e.strafeDir *= -1; }
     }
+  }
+  // Don't shoot while extending (flying away from player).
+  if (e.attackState === 'extend') return;
+  aimAndShoot(e, pickEnemyShootTarget(e, dist), dt);
+}
 
-    let espd = applyMovement(e, avoiding, drag, dt);
-    if (espd > 30 && Math.random() < 0.4 && e.type !== 'bruiser') spawnExhaust(e, e.color);
+// Gunship / bruiser: hold preferred distance, orbit, shoot. Same behavior —
+// per-type parameters (preferDist, orbitStrength, weapon) do the differentiating.
+function orbiterAI(e, dt) {
+  let dx = player.x - e.x, dy = player.y - e.y;
+  let dist = Math.sqrt(dx*dx + dy*dy);
+  e._avoiding = avoidPlanets(e, dt, player);
+  if (!e._avoiding) {
+    e.angle = turnToward(e.angle, Math.atan2(dy, dx), e.turnSpeed, dt);
+    steerOrbit(e, player.x, player.y, dist, dt);
+  }
+  aimAndShoot(e, pickEnemyShootTarget(e, dist), dt);
+}
 
-    // Kamikazes don't shoot; drones don't fire during extend
-    if (e.type === 'kamikaze') continue;
-    if (e.type === 'drone' && e.attackState === 'extend') continue;
-    // Target selection: player by default, coin-flip switch to a closer ally
-    let shootTarget = player;
-    for (let a of allies) {
-      let adx = a.x - e.x, ady = a.y - e.y;
-      if (adx*adx + ady*ady < dist*dist && Math.random() < 0.5) shootTarget = a;
+// Ally: orbit and shoot nearest enemy; if no enemies, drift toward player.
+function allyAI(a, dt) {
+  let target = null, tDist = Infinity;
+  for (let e of enemies) {
+    let dx = e.x - a.x, dy = e.y - a.y;
+    let d = Math.sqrt(dx*dx + dy*dy);
+    if (d < tDist) { tDist = d; target = e; }
+  }
+  a._avoiding = avoidPlanets(a, dt, target || player);
+  if (a._avoiding) return;
+  if (target) {
+    steerOrbit(a, target.x, target.y, tDist, dt);
+    aimAndShoot(a, target, dt);
+  } else {
+    let dx = player.x - a.x, dy = player.y - a.y;
+    a.angle = turnToward(a.angle, Math.atan2(dy, dx), a.turnSpeed, dt);
+    let d = Math.sqrt(dx*dx + dy*dy);
+    if (d > 150) {
+      a.vx += (dx/d) * a.speed * dt;
+      a.vy += (dy/d) * a.speed * dt;
     }
-    aimAndShoot(e, shootTarget, dt);
   }
 }
 
-function updateAllies(dt) {
+// Unified NPC loop. Handles EMP drift, per-ship behavior, movement, exhaust —
+// the parts every AI ship shares. Behavior-specific logic lives in ship.behavior.
+function updateNPCs(dt) {
   let drag = Math.pow(0.98, dt * 60);
-  for (let a of allies) {
-    // EMP: no AI, no drag, just drift and spin
-    if (empTimer > 0) {
-      a.angle += (a.spinRate || 0) * dt;
-      a.x += a.vx * dt;
-      a.y += a.vy * dt;
-      continue;
-    }
-    // Find nearest enemy
-    let target = null, tDist = Infinity;
-    for (let e of enemies) {
-      let dx = e.x - a.x, dy = e.y - a.y;
-      let d = Math.sqrt(dx*dx + dy*dy);
-      if (d < tDist) { tDist = d; target = e; }
-    }
-
-    let avoiding = avoidPlanets(a, dt, target || player);
-
-    if (target && !avoiding) {
-      steerOrbit(a, target.x, target.y, tDist, dt);
-      aimAndShoot(a, target, dt);
-    } else if (!avoiding) {
-      // No enemies — drift near player
-      let dx = player.x - a.x, dy = player.y - a.y;
-      a.angle = turnToward(a.angle, Math.atan2(dy, dx), a.turnSpeed, dt);
-      let d = Math.sqrt(dx*dx + dy*dy);
-      if (d > 150) {
-        a.vx += (dx/d) * a.speed * dt;
-        a.vy += (dy/d) * a.speed * dt;
+  for (let list of [enemies, allies]) {
+    for (let s of list) {
+      // EMP: no AI, no drag, just drift and spin.
+      if (empTimer > 0) {
+        s.angle += (s.spinRate || 0) * dt;
+        s.x += s.vx * dt;
+        s.y += s.vy * dt;
+        continue;
       }
+      s._avoiding = 0;
+      s.behavior(s, dt);
+      let spd = applyMovement(s, s._avoiding, drag, dt);
+      if (spd > 30 && s.exhaustColor && Math.random() < 0.4) spawnExhaust(s, s.exhaustColor);
     }
-
-    let aspd = applyMovement(a, avoiding, drag, dt);
-    if (aspd > 30 && Math.random() < 0.4) spawnExhaust(a, '#0af');
   }
 }
 
@@ -1028,8 +1046,7 @@ function update(dt) {
     nextWave();
   }
 
-  updateEnemies(dt);
-  updateAllies(dt);
+  updateNPCs(dt);
   updateProjectiles(dt);
   updateCollisions(dt);
   updatePowerups(dt);
