@@ -43,7 +43,7 @@ Each NPC has a `behavior(ship, dt)` function attached at spawn. The shared `upda
 
 - `kamikazeAI` — ram the player; no shooting
 - `droneAI` — charge/break/extend state machine; calls `aimAndShoot` during charge/break
-- `orbiterAI` — shared by gunship + bruiser (identical behavior, different weapon + orbit params)
+- `orbiterAI` — shared by gunship + bruiser (identical behavior, different weapon + orbit params). Calls `steerOrbit` then `aimAndShoot` — no separate player-facing turn, since two competing `turnToward` calls fight when orbital velocity is high.
 - `allyAI` — find nearest enemy, orbit + `aimAndShoot`; drift toward player if no enemies
 - `pickEnemyShootTarget(e, distToPlayer)` — helper; coin-flip between player and a closer ally
 
