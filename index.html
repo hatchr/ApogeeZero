@@ -51,6 +51,23 @@ canvas { display: block; }
   font-size: 24px; padding: 12px 40px; cursor: pointer;
 }
 #startBtn:hover { background: #0ff2; }
+#joystickBase {
+  display: none; position: fixed; width: 120px; height: 120px; border-radius: 50%;
+  border: 2px solid rgba(0,255,255,0.2); background: rgba(0,255,255,0.04); z-index: 6; pointer-events: none;
+}
+#joystickStick {
+  position: absolute; width: 50px; height: 50px; border-radius: 50%;
+  background: rgba(0,200,255,0.3); border: 2px solid #0cf;
+  top: 50%; left: 50%; transform: translate(-50%,-50%);
+}
+#mobileFireBtn, #mobileMissileBtn {
+  display: none; position: fixed; border-radius: 50%; width: 75px; height: 75px;
+  align-items: center; justify-content: center; font-family: 'Courier New', monospace;
+  font-weight: bold; font-size: 13px; z-index: 6;
+  user-select: none; -webkit-user-select: none; touch-action: none;
+}
+#mobileFireBtn   { right: 30px;  bottom: 40px; border: 2px solid #0ff; color: #0ff; background: rgba(0,255,255,0.1); }
+#mobileMissileBtn { right: 120px; bottom: 40px; border: 2px solid #0f0; color: #0f0; background: rgba(0,255,0,0.1); }
 </style>
 </head>
 <body>
@@ -77,10 +94,13 @@ canvas { display: block; }
   </div>
   <div class="leaderboard" id="leaderboard"></div>
 </div>
+<div id="joystickBase"><div id="joystickStick"></div></div>
+<div id="mobileFireBtn">FIRE</div>
+<div id="mobileMissileBtn">MSL</div>
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-const isMobile = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+const isMobile = window.matchMedia('(pointer: coarse) and (hover: none)').matches;
 const MAX_PARTICLES = isMobile ? 120 : 300;
 function glow(blur, color) { if (!isMobile) { ctx.shadowBlur = blur; if (color) ctx.shadowColor = color; } }
 let W, H;
@@ -112,6 +132,8 @@ function resetInputState() {
   mouseDown = false;
   rightDown = false;
   for (let key in keys) delete keys[key];
+  mJoyId = null; mAimId = null;
+  updateJoystickVisual(0, 0);
 }
 
 window.addEventListener('blur', resetInputState);
@@ -129,6 +151,8 @@ let missileEnergy = 100, missileMax = 100, missileRecharge = 8; // per second
 let plasmaCost = 5, missileCost = 20;
 let camX = 0, camY = 0;
 let shakeX = 0, shakeY = 0, shakeDur = 0;
+let mJoyId = null, mJoyBX = 0, mJoyBY = 0;
+let mAimId = null, mAimLX = 0;
 
 const STORAGE_KEYS = {
   leaderboard: 'sd_leaderboard',
@@ -1441,19 +1465,17 @@ function drawHUD() {
   ctx.fillText('LIVES: ' + lives, barX, missBarY + 8 + 18);
   glow(0);
 
-  // Score
+  // Score + Wave — top centre
+  ctx.textAlign = 'center';
   ctx.fillStyle = '#ff0';
   glow(6, '#ff0');
   ctx.font = '20px Courier New';
-  ctx.textAlign = 'right';
-  ctx.fillText('SCORE: ' + score, W - 20, 34);
+  ctx.fillText('SCORE: ' + score, W / 2, 34);
   glow(0);
-
-  // Wave
   ctx.fillStyle = '#0f0';
   glow(6, '#0f0');
   ctx.font = '16px Courier New';
-  ctx.fillText('WAVE ' + wave, W - 20, 58);
+  ctx.fillText('WAVE ' + wave, W / 2, 56);
   glow(0);
   ctx.textAlign = 'left';
 
@@ -1476,7 +1498,7 @@ function drawHUD() {
   // Radar
   let radarR = 80;
   let radarX = W - radarR - 20;
-  let radarY = H - radarR - 20;
+  let radarY = radarR + 20;
   let radarRange = 3000; // world units visible on radar
 
   // Background
@@ -1566,6 +1588,7 @@ function gameOver() {
   gameRunning = false;
   gameOverActive = true;
   resetInputState();
+  showMobileControls(false);
   setTimeout(() => document.exitPointerLock?.(), 0);
   document.getElementById('finalScore').textContent = 'Score: ' + score;
   document.getElementById('finalWave').textContent = 'Wave Reached: ' + wave;
@@ -1642,14 +1665,106 @@ document.getElementById('restartBtn').addEventListener('click', () => {
   document.getElementById('nameInput').value = readSavedPlayerName();
   gameOverActive = false;
   initGame();
+  showMobileControls(true);
   gameRunning = true;
 });
 
 document.getElementById('startBtn').addEventListener('click', () => {
   document.getElementById('startScreen').classList.add('hidden');
   initGame();
+  showMobileControls(true);
   gameRunning = true;
 });
+
+function updateJoystickVisual(dx, dy) {
+  let stick = document.getElementById('joystickStick');
+  if (stick) stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+}
+
+function showMobileControls(show) {
+  if (!isMobile) return;
+  if (!show) document.getElementById('joystickBase').style.display = 'none';
+  let d = show ? 'flex' : 'none';
+  document.getElementById('mobileFireBtn').style.display = d;
+  document.getElementById('mobileMissileBtn').style.display = d;
+}
+
+function mobileSetup() {
+  if (!isMobile) return;
+  canvas.style.touchAction = 'none';
+  const JOY_R = 55;
+  let fireEl = document.getElementById('mobileFireBtn');
+  let missEl = document.getElementById('mobileMissileBtn');
+
+  fireEl.addEventListener('touchstart', e => { e.preventDefault(); mouseDown = true;  }, { passive: false });
+  fireEl.addEventListener('touchend',   e => { e.preventDefault(); mouseDown = false; }, { passive: false });
+  fireEl.addEventListener('touchcancel', () => { mouseDown = false; });
+  missEl.addEventListener('touchstart', e => { e.preventDefault(); rightDown = true;  }, { passive: false });
+  missEl.addEventListener('touchend',   e => { e.preventDefault(); rightDown = false; }, { passive: false });
+  missEl.addEventListener('touchcancel', () => { rightDown = false; });
+
+  window.addEventListener('touchstart', e => {
+    if (!gameRunning) return;
+    for (let t of e.changedTouches) {
+      if (e.target === fireEl || e.target === missEl) continue;
+      let x = t.clientX, y = t.clientY;
+      if (mJoyId === null && x < W * 0.4 && y > H * 0.5) {
+        mJoyId = t.identifier;
+        mJoyBX = x; mJoyBY = y;
+        let base = document.getElementById('joystickBase');
+        base.style.left = (x - 60) + 'px';
+        base.style.top  = (y - 60) + 'px';
+        base.style.bottom = 'auto';
+        base.style.display = 'block';
+        updateJoystickVisual(0, 0);
+      } else if (mAimId === null) {
+        mAimId = t.identifier;
+        mAimLX = x;
+      }
+    }
+  }, { passive: true });
+
+  window.addEventListener('touchmove', e => {
+    if (!gameRunning) return;
+    e.preventDefault();
+    for (let t of e.changedTouches) {
+      if (t.identifier === mJoyId) {
+        let dx = t.clientX - mJoyBX, dy = t.clientY - mJoyBY;
+        let len = Math.sqrt(dx*dx + dy*dy);
+        if (len > JOY_R) { dx = dx/len*JOY_R; dy = dy/len*JOY_R; }
+        updateJoystickVisual(dx, dy);
+        let thr = JOY_R * 0.25;
+        keys['w'] = dy < -thr;
+        keys['s'] = dy >  thr;
+        keys['a'] = dx < -thr;
+        keys['d'] = dx >  thr;
+      } else if (t.identifier === mAimId) {
+        mouseDX += (t.clientX - mAimLX) * 1.5;
+        mAimLX = t.clientX;
+      }
+    }
+  }, { passive: false });
+
+  function endTouch(e) {
+    for (let t of e.changedTouches) {
+      if (t.identifier === mJoyId) {
+        mJoyId = null;
+        keys['w'] = keys['s'] = keys['a'] = keys['d'] = false;
+        updateJoystickVisual(0, 0);
+      } else if (t.identifier === mAimId) {
+        mAimId = null;
+      }
+    }
+  }
+  window.addEventListener('touchend',    endTouch, { passive: true });
+  window.addEventListener('touchcancel', endTouch, { passive: true });
+
+  let ctrl = document.querySelector('#startScreen .controls');
+  if (ctrl) ctrl.innerHTML =
+    '<span>Left thumb</span> — Joystick (thrust)<br>' +
+    '<span>Right drag</span> — Rotate ship<br>' +
+    '<span>FIRE</span> — Plasma bolt &nbsp; <span>MSL</span> — Missile';
+}
 
 function loop(time) {
   let dt = Math.min((time - lastTime) / 1000, 0.05);
@@ -1658,6 +1773,7 @@ function loop(time) {
   draw();
   requestAnimationFrame(loop);
 }
+mobileSetup();
 requestAnimationFrame(t => { lastTime = t; requestAnimationFrame(loop); });
 </script>
 </body>

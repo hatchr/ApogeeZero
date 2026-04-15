@@ -35,8 +35,10 @@
 
 ### Controls
 - [x] Current control scheme is standard for this genre
-- [ ] Touch / screen controls for mobile remain an open design topic
-  - Mobile is detected (`isMobile` flag, reduced particle cap) but no touch event handlers are registered yet.
+- [x] Touch / screen controls for mobile
+  - Floating joystick (bottom-left zone, appears at touch point) → WASD thrust; right-side drag → ship rotation; **FIRE** / **MSL** buttons bottom-right.
+  - `isMobile` uses `matchMedia('(pointer: coarse) and (hover: none)')` — correctly excludes touchscreen laptops and Windows PCs with touch drivers.
+  - Controls shown/hidden via `showMobileControls()` at game start/over; invisible on desktop regardless.
 
 ### Platform
 - [x] Continue as browser‑based

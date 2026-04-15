@@ -15,17 +15,26 @@ Open index.html in a browser. Click canvas to engage pointer lock.
 
 ## Controls
 
+### Desktop
 - WASD: thrust (Newtonian physics with damping)
 - Mouse movement: rotate ship (pointer lock, relative)
 - Left click: plasma bolt (fast, weak, drains plasma bar)
 - Right click: missile (slow, powerful, drains missile bar)
 
+### Mobile (touch)
+- Left-thumb drag in bottom-left zone: floating joystick → WASD thrust (appears at first touch point, 55 px max deflection)
+- Right-side drag anywhere else: rotates ship (feeds `mouseDX`, 1.5× sensitivity)
+- **FIRE** button (bottom-right): plasma bolt
+- **MSL** button (bottom-right): missile
+
 ## Code structure (inside `<script>`)
 
 ### State & setup
 - Global state variables, input handlers, pointer lock
+- `isMobile` — detected via `matchMedia('(pointer: coarse) and (hover: none)')`. Reliable on touch-primary devices; correctly `false` on touchscreen laptops where the mouse is still the primary pointer. Controls `MAX_PARTICLES` cap (120 vs 300) and glow suppression.
 - `initGame()`, `makeStars()`, `makePlanets()`, `nextWave()`
 - `spawnEnemy()`, `spawnAlly()`, `safeSpawnPoint()`
+- `mobileSetup()` — registers all touch handlers once at startup; no-ops on desktop. `showMobileControls(show)` shows/hides the joystick base and FIRE/MSL buttons. `updateJoystickVisual(dx, dy)` moves the stick knob and is also called from `resetInputState()` to snap it back to centre.
 
 ### Shared helpers
 - `screenShake()`, `spawnParticles()`, `spawnExhaust()`
@@ -61,7 +70,7 @@ Each NPC has a `behavior(ship, dt)` function attached at spawn. The shared `upda
 - `drawShip()` — procedural ship shapes (player/ally arrow, drone triangle, gunship diamond, bruiser hexagon)
 - `drawBar()` — reusable neon HUD bar
 - `draw()` — stars, planets, particles, projectiles, powerups, ships, shield, EMP shockwave, HUD
-- `drawHUD()` — HP/plasma/missile bars, lives, score, wave, active powerups
+- `drawHUD()` — HP/plasma/missile bars + lives + active powerup timers (top-left); score + wave (top-centre); radar (top-right, radius 80, 20 px margin)
 
 ### Game flow
 - `gameOver()` — releases pointer lock, hides save UI for non-qualifying scores
