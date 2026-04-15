@@ -104,8 +104,14 @@ const ctx = canvas.getContext('2d');
 const isMobile = window.matchMedia('(pointer: coarse) and (hover: none)').matches;
 const MAX_PARTICLES = isMobile ? 120 : 300;
 function glow(blur, color) { if (!isMobile) { ctx.shadowBlur = blur; if (color) ctx.shadowColor = color; } }
-let W, H;
-function resize() { W = canvas.width = window.innerWidth; H = canvas.height = window.innerHeight; }
+let W, H, viewZoom = 1;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+  // Zoom out on small screens so enemies are visible before they're on top of you.
+  // Reference min-dimension 700px → zoom 1.0 (desktop untouched). Below that, shrink.
+  viewZoom = Math.min(1, Math.min(W, H) / 700);
+}
 resize();
 window.addEventListener('resize', resize);
 
@@ -1337,10 +1343,7 @@ function draw() {
 
   if (!player) return;
 
-  let ox = -camX + W/2 + shakeX;
-  let oy = -camY + H/2 + shakeY;
-
-  // Stars (parallax)
+  // Stars (parallax) — screen space, unaffected by world zoom
   for (let s of stars) {
     let sx = ((s.x - camX * s.depth) % 2000 + 3000) % 2000 - 1000 + W/2;
     let sy = ((s.y - camY * s.depth) % 2000 + 3000) % 2000 - 1000 + H/2;
@@ -1349,7 +1352,9 @@ function draw() {
   }
 
   ctx.save();
-  ctx.translate(ox, oy);
+  ctx.translate(W/2 + shakeX, H/2 + shakeY);
+  ctx.scale(viewZoom, viewZoom);
+  ctx.translate(-camX, -camY);
 
   // Planets
   for (let pl of planets) {
@@ -1759,7 +1764,7 @@ function mobileSetup() {
     if (!gameRunning) return;
     for (let t of e.changedTouches) {
       let x = t.clientX, y = t.clientY;
-      if (mJoyId === null && x < W * 0.4 && y > H * 0.5) {
+      if (mJoyId === null && x < W * 0.4) {
         mJoyId = t.identifier;
         mJoyBX = x; mJoyBY = y;
         let base = document.getElementById('joystickBase');
@@ -1768,7 +1773,7 @@ function mobileSetup() {
         base.style.bottom = 'auto';
         base.style.display = 'block';
         updateJoystickVisual(0, 0);
-      } else if (mRJoyId === null && x > W * 0.6 && y > H * 0.5) {
+      } else if (mRJoyId === null && x > W * 0.6) {
         mRJoyId = t.identifier;
         mRJoyBX = x;
         mRJoyDX = 0;
@@ -1788,7 +1793,7 @@ function mobileSetup() {
     for (let t of e.changedTouches) {
       let x = t.clientX, y = t.clientY;
       // Re-adopt a still-pressed finger whose ID was cleared by resetInputState on respawn
-      if (mJoyId === null && x < W * 0.4 && y > H * 0.5) {
+      if (mJoyId === null && x < W * 0.4) {
         mJoyId = t.identifier;
         mJoyBX = x; mJoyBY = y;
         let base = document.getElementById('joystickBase');
@@ -1797,7 +1802,7 @@ function mobileSetup() {
         base.style.bottom = 'auto';
         base.style.display = 'block';
         updateJoystickVisual(0, 0);
-      } else if (mRJoyId === null && x > W * 0.6 && y > H * 0.5) {
+      } else if (mRJoyId === null && x > W * 0.6) {
         mRJoyId = t.identifier;
         mRJoyBX = x;
         mRJoyDX = 0;
