@@ -702,10 +702,10 @@ function orbiterAI(e, dt) {
   let dx = player.x - e.x, dy = player.y - e.y;
   let dist = Math.sqrt(dx*dx + dy*dy);
   e._avoiding = avoidPlanets(e, dt, player);
-  if (!e._avoiding) {
-    e.angle = turnToward(e.angle, Math.atan2(dy, dx), e.turnSpeed, dt);
-    steerOrbit(e, player.x, player.y, dist, dt);
-  }
+  if (!e._avoiding) steerOrbit(e, player.x, player.y, dist, dt);
+  // aimAndShoot handles all turning via lead-shot; no separate player-facing
+  // turn here — two competing turnToward calls fight when orbital velocity is
+  // high, causing the nose to stall between the two target angles.
   aimAndShoot(e, pickEnemyShootTarget(e, dist), dt);
 }
 
