@@ -96,7 +96,7 @@ window.addEventListener('keydown', e => keys[e.key.toLowerCase()] = true);
 window.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
 window.addEventListener('mousemove', e => { mouseDX += e.movementX; });
 canvas.addEventListener('mousedown', e => {
-  if (!pointerLocked) { canvas.requestPointerLock(); return; }
+  if (!pointerLocked) { canvas.requestPointerLock?.(); return; }
   if (e.button === 0) mouseDown = true;
   if (e.button === 2) rightDown = true;
 });
@@ -106,6 +106,15 @@ document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvas;
   if (!pointerLocked) { mouseDown = false; rightDown = false; }
 });
+
+function resetInputState() {
+  mouseDX = 0;
+  mouseDown = false;
+  rightDown = false;
+  for (let key in keys) delete keys[key];
+}
+
+window.addEventListener('blur', resetInputState);
 
 // Game state
 let player, enemies, projectiles, particles, stars, planets, powerups, allies;
@@ -120,6 +129,11 @@ let missileEnergy = 100, missileMax = 100, missileRecharge = 8; // per second
 let plasmaCost = 5, missileCost = 20;
 let camX = 0, camY = 0;
 let shakeX = 0, shakeY = 0, shakeDur = 0;
+
+const STORAGE_KEYS = {
+  leaderboard: 'sd_leaderboard',
+  playerName: 'sd_playerName'
+};
 
 // Stars
 function makeStars() {
@@ -136,6 +150,7 @@ function makeStars() {
 }
 
 function initGame() {
+  resetInputState();
   player = { x: 0, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, hp: 100, maxHp: 100, radius: 16 };
   enemies = []; projectiles = []; particles = []; powerups = []; allies = [];
   score = 0; wave = 0; waveTimer = 2; waveEnemiesLeft = 0; enemiesAlive = 0;
@@ -308,6 +323,21 @@ function turnToward(current, target, rate, dt) {
 
 function screenShake(dur) { shakeDur = Math.max(shakeDur, dur); }
 
+function addParticle(particle) {
+  if (particles.length >= MAX_PARTICLES) return false;
+  particles.push(particle);
+  return true;
+}
+
+function normalized(dx, dy, fallbackAngle) {
+  let distSq = dx * dx + dy * dy;
+  if (distSq < 0.000001) {
+    return { nx: Math.cos(fallbackAngle), ny: Math.sin(fallbackAngle), dist: 0 };
+  }
+  let dist = Math.sqrt(distSq);
+  return { nx: dx / dist, ny: dy / dist, dist };
+}
+
 function spawnParticles(x, y, color, count, speed) {
   let room = MAX_PARTICLES - particles.length;
   if (room <= 0) return;
@@ -315,7 +345,7 @@ function spawnParticles(x, y, color, count, speed) {
   for (let i = 0; i < count; i++) {
     let a = Math.random() * Math.PI * 2;
     let s = Math.random() * speed;
-    particles.push({ x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s, life: 0.5 + Math.random()*0.5, maxLife: 0.8, color, size: Math.random()*3+1 });
+    addParticle({ x, y, vx: Math.cos(a)*s, vy: Math.sin(a)*s, life: 0.5 + Math.random()*0.5, maxLife: 0.8, color, size: Math.random()*3+1 });
   }
 }
 
@@ -335,9 +365,8 @@ function damagePlayer(amount) {
 
 function handlePlanetCollision(obj, pl) {
   let dx = obj.x - pl.x, dy = obj.y - pl.y;
-  let dist = Math.sqrt(dx*dx + dy*dy);
+  let { nx, ny, dist } = normalized(dx, dy, obj.angle || 0);
   if (dist < pl.radius + obj.radius) {
-    let nx = dx/dist, ny = dy/dist;
     obj.x = pl.x + nx * (pl.radius + obj.radius);
     obj.y = pl.y + ny * (pl.radius + obj.radius);
     let impactSpeed = Math.abs(obj.vx * nx + obj.vy * ny);
@@ -360,7 +389,7 @@ function spawnExhaust(obj, color) {
   let spread = (Math.random() - 0.5) * 0.6;
   let a = obj.angle + Math.PI + spread;
   let s = 40 + Math.random() * 40;
-  particles.push({ x: ex, y: ey, vx: Math.cos(a)*s + obj.vx*0.3, vy: Math.sin(a)*s + obj.vy*0.3, life: 0.2+Math.random()*0.15, maxLife: 0.35, color: color, size: 1.5+Math.random()*1.5 });
+  addParticle({ x: ex, y: ey, vx: Math.cos(a)*s + obj.vx*0.3, vy: Math.sin(a)*s + obj.vy*0.3, life: 0.2+Math.random()*0.15, maxLife: 0.35, color: color, size: 1.5+Math.random()*1.5 });
 }
 
 function fireProjectile(owner, x, y, angle, type, srcVx, srcVy, opts) {
@@ -462,11 +491,10 @@ function avoidPlanets(obj, dt, navTarget) {
     let dx = obj.x - pl.x, dy = obj.y - pl.y;
     let distSq = dx*dx + dy*dy;
     if (distSq >= pl.dangerZone * pl.dangerZone) continue;
-    let dist = Math.sqrt(distSq);
+    let { nx, ny, dist } = normalized(dx, dy, obj.angle || 0);
     let urgency = (pl.dangerZone - dist) / pl.dangerMargin;
     urgency = urgency * urgency;
     if (urgency < 0.01) continue;
-    let nx = dx / dist, ny = dy / dist;
     // Tangent direction — curve toward navTarget if provided, else follow velocity
     let cross = navTarget
       ? nx * (navTarget.y - pl.y) - ny * (navTarget.x - pl.x)
@@ -598,7 +626,7 @@ function updatePlayer(dt) {
       let spread = (Math.random()-0.5)*0.6;
       let a = player.angle + Math.PI + spread;
       let s = 80 + Math.random()*60;
-      particles.push({ x: ex, y: ey, vx: Math.cos(a)*s + player.vx*0.3, vy: Math.sin(a)*s + player.vy*0.3, life: 0.3+Math.random()*0.2, maxLife: 0.5, color: '#0af', size: 2+Math.random()*2 });
+      addParticle({ x: ex, y: ey, vx: Math.cos(a)*s + player.vx*0.3, vy: Math.sin(a)*s + player.vy*0.3, life: 0.3+Math.random()*0.2, maxLife: 0.5, color: '#0af', size: 2+Math.random()*2 });
     }
   }
 
@@ -776,7 +804,7 @@ function updateProjectiles(dt) {
     p.life -= dt;
     // Trail
     if (Math.random() < 0.5) {
-      particles.push({ x: p.x, y: p.y, vx: (Math.random()-0.5)*20, vy: (Math.random()-0.5)*20, life: 0.15, maxLife: 0.2, color: p.color, size: p.radius*0.6 });
+      addParticle({ x: p.x, y: p.y, vx: (Math.random()-0.5)*20, vy: (Math.random()-0.5)*20, life: 0.15, maxLife: 0.2, color: p.color, size: p.radius*0.6 });
     }
     if (p.life <= 0) { projectiles.splice(i, 1); continue; }
 
@@ -898,10 +926,9 @@ function updateCollisions(dt) {
   for (let i = allies.length - 1; i >= 0; i--) {
     let a = allies[i];
     let ddx = a.x - player.x, ddy = a.y - player.y;
-    let dist = Math.sqrt(ddx*ddx + ddy*ddy);
+    let { nx, ny, dist } = normalized(ddx, ddy, a.angle || 0);
     if (dist < a.radius + player.radius) {
       // Push apart
-      let nx = ddx/dist, ny = ddy/dist;
       a.x = player.x + nx * (a.radius + player.radius);
       a.y = player.y + ny * (a.radius + player.radius);
       let impactSpeed = Math.abs((player.vx - a.vx) * nx + (player.vy - a.vy) * ny);
@@ -927,7 +954,7 @@ function updateCollisions(dt) {
     for (let j = enemies.length - 1; j >= 0; j--) {
       let e = enemies[j];
       let ddx = a.x - e.x, ddy = a.y - e.y;
-      let dist = Math.sqrt(ddx*ddx + ddy*ddy);
+      let { nx, ny, dist } = normalized(ddx, ddy, a.angle || 0);
       if (dist < a.radius + e.radius) {
         if (e.type === 'kamikaze') {
           // Kamikaze explodes on ally contact too
@@ -942,7 +969,6 @@ function updateCollisions(dt) {
           if (allyDead) break;
           continue;
         }
-        let nx = ddx/dist, ny = ddy/dist;
         a.x = e.x + nx * (a.radius + e.radius);
         a.y = e.y + ny * (a.radius + e.radius);
         let impactSpeed = Math.abs((e.vx - a.vx) * nx + (e.vy - a.vy) * ny);
@@ -981,11 +1007,11 @@ function updatePowerups(dt) {
     if (pu.life <= 0) { powerups.splice(i, 1); continue; }
     let dx = player.x - pu.x, dy = player.y - pu.y;
     let distSq = dx*dx + dy*dy;
-    let dist = Math.sqrt(distSq);
+    let { nx, ny } = normalized(dx, dy, player.angle || 0);
     // Powerups gravitate toward player
     let force = 5000000 / (distSq + 500);
-    pu.vx += (dx / dist) * force * dt;
-    pu.vy += (dy / dist) * force * dt;
+    pu.vx += nx * force * dt;
+    pu.vy += ny * force * dt;
     pu.x += pu.vx * dt;
     pu.y += pu.vy * dt;
     dx = player.x - pu.x; dy = player.y - pu.y;
@@ -1535,24 +1561,54 @@ function drawHUD() {
 function gameOver() {
   gameRunning = false;
   gameOverActive = true;
-  setTimeout(() => document.exitPointerLock(), 0);
+  resetInputState();
+  setTimeout(() => document.exitPointerLock?.(), 0);
   document.getElementById('finalScore').textContent = 'Score: ' + score;
   document.getElementById('finalWave').textContent = 'Wave Reached: ' + wave;
   // Only show name input and save button if score qualifies for top 5
-  let lb = JSON.parse(localStorage.getItem('sd_leaderboard') || '[]');
+  let lb = readLeaderboard();
   lb.sort((a,b) => b.score - a.score);
   let qualifies = score > 0 && (lb.length < 5 || score > lb[lb.length - 1].score);
   document.getElementById('nameInput').style.display = qualifies ? '' : 'none';
   document.getElementById('submitScore').style.display = qualifies ? '' : 'none';
   if (qualifies) {
-    document.getElementById('nameInput').value = localStorage.getItem('sd_playerName') || '';
+    document.getElementById('nameInput').value = readSavedPlayerName();
   }
   document.getElementById('gameOver').classList.add('active');
   showLeaderboard();
 }
 
+function readLeaderboard() {
+  try {
+    let lb = JSON.parse(localStorage.getItem(STORAGE_KEYS.leaderboard) || '[]');
+    return Array.isArray(lb) ? lb : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLeaderboard(lb) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.leaderboard, JSON.stringify(lb));
+  } catch {}
+}
+
+function readSavedPlayerName() {
+  try {
+    return localStorage.getItem(STORAGE_KEYS.playerName) || '';
+  } catch {
+    return '';
+  }
+}
+
+function savePlayerName(name) {
+  try {
+    localStorage.setItem(STORAGE_KEYS.playerName, name);
+  } catch {}
+}
+
 function showLeaderboard() {
-  let lb = JSON.parse(localStorage.getItem('sd_leaderboard') || '[]');
+  let lb = readLeaderboard();
   let html = '<h2>TOP SCORES</h2>';
   lb.sort((a,b) => b.score - a.score);
   lb.slice(0, 5).forEach((e, i) => {
@@ -1564,12 +1620,12 @@ function showLeaderboard() {
 
 document.getElementById('submitScore').addEventListener('click', () => {
   let name = document.getElementById('nameInput').value.trim() || 'ACE';
-  localStorage.setItem('sd_playerName', name);
-  let lb = JSON.parse(localStorage.getItem('sd_leaderboard') || '[]');
+  savePlayerName(name);
+  let lb = readLeaderboard();
   lb.push({ name, score, wave });
   lb.sort((a,b) => b.score - a.score);
   if (lb.length > 5) lb.length = 5;
-  localStorage.setItem('sd_leaderboard', JSON.stringify(lb));
+  saveLeaderboard(lb);
   showLeaderboard();
   document.getElementById('submitScore').disabled = true;
   document.getElementById('submitScore').textContent = 'SAVED';
@@ -1579,7 +1635,7 @@ document.getElementById('restartBtn').addEventListener('click', () => {
   document.getElementById('gameOver').classList.remove('active');
   document.getElementById('submitScore').disabled = false;
   document.getElementById('submitScore').textContent = 'SAVE SCORE';
-  document.getElementById('nameInput').value = localStorage.getItem('sd_playerName') || '';
+  document.getElementById('nameInput').value = readSavedPlayerName();
   gameOverActive = false;
   initGame();
   gameRunning = true;
