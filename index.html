@@ -739,18 +739,21 @@ function updatePlayer(dt) {
     if (onTarget) {
       let fx = player.x + Math.cos(player.angle) * 20;
       let fy = player.y + Math.sin(player.angle) * 20;
+      let plasmaFireCost = spreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
+      let firePlasma = () => {
+        if (spreadTimer > 0) {
+          fireProjectile('player', fx, fy, player.angle - 0.2, 'plasma', player.vx, player.vy);
+          fireProjectile('player', fx, fy, player.angle,       'plasma', player.vx, player.vy);
+          fireProjectile('player', fx, fy, player.angle + 0.2, 'plasma', player.vx, player.vy);
+        } else {
+          fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
+        }
+        plasmaEnergy -= plasmaFireCost;
+        plasmaCD = 0.1;
+      };
       if (mobileAutoSeq < 2) {
-        let cost = spreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
-        if (plasmaCD <= 0 && plasmaEnergy >= cost) {
-          if (spreadTimer > 0) {
-            fireProjectile('player', fx, fy, player.angle - 0.2, 'plasma', player.vx, player.vy);
-            fireProjectile('player', fx, fy, player.angle,       'plasma', player.vx, player.vy);
-            fireProjectile('player', fx, fy, player.angle + 0.2, 'plasma', player.vx, player.vy);
-          } else {
-            fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
-          }
-          plasmaEnergy -= cost;
-          plasmaCD = 0.1;
+        if (plasmaCD <= 0 && plasmaEnergy >= plasmaFireCost) {
+          firePlasma();
           mobileAutoSeq++;
         }
       } else {
@@ -759,10 +762,8 @@ function updatePlayer(dt) {
           missileEnergy -= missileCost;
           missileCD = 0.5;
           mobileAutoSeq = 0;
-        } else if (plasmaCD <= 0 && plasmaEnergy >= cost) {
-          fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
-          plasmaEnergy -= cost;
-          plasmaCD = 0.1;
+        } else if (plasmaCD <= 0 && plasmaEnergy >= plasmaFireCost) {
+          firePlasma();
           mobileAutoSeq = 0;
         }
       }
