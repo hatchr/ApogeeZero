@@ -60,14 +60,16 @@ canvas { display: block; }
   background: rgba(0,200,255,0.3); border: 2px solid #0cf;
   top: 50%; left: 50%; transform: translate(-50%,-50%);
 }
-#mobileFireBtn, #mobileMissileBtn {
-  display: none; position: fixed; border-radius: 50%; width: 75px; height: 75px;
-  align-items: center; justify-content: center; font-family: 'Courier New', monospace;
-  font-weight: bold; font-size: 13px; z-index: 6;
-  user-select: none; -webkit-user-select: none; touch-action: none;
+#rJoyBase {
+  display: none; position: fixed; width: 90px; height: 190px; border-radius: 45px;
+  border: 2px solid rgba(0,255,0,0.2); background: rgba(0,255,0,0.04);
+  z-index: 6; pointer-events: none; overflow: hidden;
 }
-#mobileFireBtn   { right: 30px;  bottom: 40px; border: 2px solid #0ff; color: #0ff; background: rgba(0,255,255,0.1); }
-#mobileMissileBtn { right: 120px; bottom: 40px; border: 2px solid #0f0; color: #0f0; background: rgba(0,255,0,0.1); }
+#rJoyStick {
+  position: absolute; width: 48px; height: 48px; border-radius: 50%;
+  background: rgba(0,200,100,0.3); border: 2px solid #0c6;
+  top: 50%; left: 50%; transform: translate(-50%, -50%);
+}
 </style>
 </head>
 <body>
@@ -95,8 +97,7 @@ canvas { display: block; }
   <div class="leaderboard" id="leaderboard"></div>
 </div>
 <div id="joystickBase"><div id="joystickStick"></div></div>
-<div id="mobileFireBtn">FIRE</div>
-<div id="mobileMissileBtn">MSL</div>
+<div id="rJoyBase"><div id="rJoyStick"></div></div>
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -132,8 +133,9 @@ function resetInputState() {
   mouseDown = false;
   rightDown = false;
   for (let key in keys) delete keys[key];
-  mJoyId = null; mAimId = null;
+  mJoyId = null; mRJoyId = null; mRJoyDX = 0; mobileAutoSeq = 0;
   updateJoystickVisual(0, 0);
+  updateRJoyVisual(0);
 }
 
 window.addEventListener('blur', resetInputState);
@@ -152,7 +154,10 @@ let plasmaCost = 5, missileCost = 20;
 let camX = 0, camY = 0;
 let shakeX = 0, shakeY = 0, shakeDur = 0;
 let mJoyId = null, mJoyBX = 0, mJoyBY = 0;
-let mAimId = null, mAimLX = 0;
+let mRJoyId = null, mRJoyBX = 0, mRJoyDX = 0;
+let mobileAutoSeq = 0;
+const AUTOFIRE_ARC = 0.22; // ~12.5° — lead-shot must be within this arc to autofire
+const RJOY_RATE    = 0.1;  // rad/s per pixel of right-joystick deflection
 
 const STORAGE_KEYS = {
   leaderboard: 'sd_leaderboard',
@@ -657,7 +662,8 @@ function updatePhysics(dt) {
 }
 
 function updatePlayer(dt) {
-  // Player rotation — relative mouse movement, immediate response
+  // Player rotation — mouse on desktop; right joystick applies a rate-based turn on mobile
+  if (isMobile && mRJoyDX !== 0) player.angle += mRJoyDX * RJOY_RATE * dt;
   player.angle += mouseDX * 0.004;
   mouseDX = 0;
 
@@ -712,6 +718,53 @@ function updatePlayer(dt) {
     fireProjectile('player', fx, fy, player.angle, 'missile', player.vx, player.vy, { homing: homingTimer > 0 });
     missileEnergy -= missileCost;
     missileCD = 0.5;
+  }
+
+  // Mobile autofire: plasma → plasma → missile, repeat.
+  // Uses leadShot to account for both ship and target velocity and the
+  // speed difference between plasma (600) and missile (300).
+  if (isMobile && enemies.length > 0) {
+    let useSpeed = mobileAutoSeq < 2 ? PROJECTILE_DEFS.plasma.speed : PROJECTILE_DEFS.missile.speed;
+    let onTarget = false;
+    for (let e of enemies) {
+      let la = leadShot(player.x, player.y, player.vx, player.vy,
+                        e.x, e.y, e.vx || 0, e.vy || 0, useSpeed);
+      let d = la - player.angle;
+      while (d >  Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      if (Math.abs(d) < AUTOFIRE_ARC) { onTarget = true; break; }
+    }
+    if (onTarget) {
+      let fx = player.x + Math.cos(player.angle) * 20;
+      let fy = player.y + Math.sin(player.angle) * 20;
+      if (mobileAutoSeq < 2) {
+        let cost = spreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
+        if (plasmaCD <= 0 && plasmaEnergy >= cost) {
+          if (spreadTimer > 0) {
+            fireProjectile('player', fx, fy, player.angle - 0.2, 'plasma', player.vx, player.vy);
+            fireProjectile('player', fx, fy, player.angle,       'plasma', player.vx, player.vy);
+            fireProjectile('player', fx, fy, player.angle + 0.2, 'plasma', player.vx, player.vy);
+          } else {
+            fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
+          }
+          plasmaEnergy -= cost;
+          plasmaCD = 0.1;
+          mobileAutoSeq++;
+        }
+      } else {
+        if (missileCD <= 0 && missileEnergy >= missileCost) {
+          fireProjectile('player', fx, fy, player.angle, 'missile', player.vx, player.vy, { homing: homingTimer > 0 });
+          missileEnergy -= missileCost;
+          missileCD = 0.5;
+          mobileAutoSeq = 0;
+        } else if (plasmaCD <= 0 && plasmaEnergy >= cost) {
+          fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
+          plasmaEnergy -= cost;
+          plasmaCD = 0.1;
+          mobileAutoSeq = 0;
+        }
+      }
+    }
   }
 }
 
@@ -1681,32 +1734,27 @@ function updateJoystickVisual(dx, dy) {
   if (stick) stick.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
 }
 
+function updateRJoyVisual(dx) {
+  let stick = document.getElementById('rJoyStick');
+  if (stick) stick.style.transform = `translate(calc(-50% + ${dx}px), -50%)`;
+}
+
 function showMobileControls(show) {
   if (!isMobile) return;
-  if (!show) document.getElementById('joystickBase').style.display = 'none';
-  let d = show ? 'flex' : 'none';
-  document.getElementById('mobileFireBtn').style.display = d;
-  document.getElementById('mobileMissileBtn').style.display = d;
+  if (!show) {
+    document.getElementById('joystickBase').style.display = 'none';
+    document.getElementById('rJoyBase').style.display = 'none';
+  }
 }
 
 function mobileSetup() {
   if (!isMobile) return;
   canvas.style.touchAction = 'none';
-  const JOY_R = 55;
-  let fireEl = document.getElementById('mobileFireBtn');
-  let missEl = document.getElementById('mobileMissileBtn');
-
-  fireEl.addEventListener('touchstart', e => { e.preventDefault(); mouseDown = true;  }, { passive: false });
-  fireEl.addEventListener('touchend',   e => { e.preventDefault(); mouseDown = false; }, { passive: false });
-  fireEl.addEventListener('touchcancel', () => { mouseDown = false; });
-  missEl.addEventListener('touchstart', e => { e.preventDefault(); rightDown = true;  }, { passive: false });
-  missEl.addEventListener('touchend',   e => { e.preventDefault(); rightDown = false; }, { passive: false });
-  missEl.addEventListener('touchcancel', () => { rightDown = false; });
-
+  const JOY_L = 55; // left joystick max radius
+  const JOY_R = 35; // right joystick max horizontal deflection
   window.addEventListener('touchstart', e => {
     if (!gameRunning) return;
     for (let t of e.changedTouches) {
-      if (e.target === fireEl || e.target === missEl) continue;
       let x = t.clientX, y = t.clientY;
       if (mJoyId === null && x < W * 0.4 && y > H * 0.5) {
         mJoyId = t.identifier;
@@ -1717,9 +1765,16 @@ function mobileSetup() {
         base.style.bottom = 'auto';
         base.style.display = 'block';
         updateJoystickVisual(0, 0);
-      } else if (mAimId === null) {
-        mAimId = t.identifier;
-        mAimLX = x;
+      } else if (mRJoyId === null && x > W * 0.6 && y > H * 0.5) {
+        mRJoyId = t.identifier;
+        mRJoyBX = x;
+        mRJoyDX = 0;
+        let base = document.getElementById('rJoyBase');
+        base.style.left   = (x - 45) + 'px';
+        base.style.top    = (t.clientY - 95) + 'px';
+        base.style.bottom = 'auto';
+        base.style.display = 'block';
+        updateRJoyVisual(0);
       }
     }
   }, { passive: true });
@@ -1731,16 +1786,19 @@ function mobileSetup() {
       if (t.identifier === mJoyId) {
         let dx = t.clientX - mJoyBX, dy = t.clientY - mJoyBY;
         let len = Math.sqrt(dx*dx + dy*dy);
-        if (len > JOY_R) { dx = dx/len*JOY_R; dy = dy/len*JOY_R; }
+        if (len > JOY_L) { dx = dx/len*JOY_L; dy = dy/len*JOY_L; }
         updateJoystickVisual(dx, dy);
-        let thr = JOY_R * 0.25;
+        let thr = JOY_L * 0.25;
         keys['w'] = dy < -thr;
         keys['s'] = dy >  thr;
         keys['a'] = dx < -thr;
         keys['d'] = dx >  thr;
-      } else if (t.identifier === mAimId) {
-        mouseDX += (t.clientX - mAimLX) * 1.5;
-        mAimLX = t.clientX;
+      } else if (t.identifier === mRJoyId) {
+        let dx = t.clientX - mRJoyBX;
+        if (dx >  JOY_R) dx =  JOY_R;
+        if (dx < -JOY_R) dx = -JOY_R;
+        mRJoyDX = dx;
+        updateRJoyVisual(dx);
       }
     }
   }, { passive: false });
@@ -1751,8 +1809,12 @@ function mobileSetup() {
         mJoyId = null;
         keys['w'] = keys['s'] = keys['a'] = keys['d'] = false;
         updateJoystickVisual(0, 0);
-      } else if (t.identifier === mAimId) {
-        mAimId = null;
+        document.getElementById('joystickBase').style.display = 'none';
+      } else if (t.identifier === mRJoyId) {
+        mRJoyId = null;
+        mRJoyDX = 0;
+        updateRJoyVisual(0);
+        document.getElementById('rJoyBase').style.display = 'none';
       }
     }
   }
@@ -1761,9 +1823,9 @@ function mobileSetup() {
 
   let ctrl = document.querySelector('#startScreen .controls');
   if (ctrl) ctrl.innerHTML =
-    '<span>Left thumb</span> — Joystick (thrust)<br>' +
-    '<span>Right drag</span> — Rotate ship<br>' +
-    '<span>FIRE</span> — Plasma bolt &nbsp; <span>MSL</span> — Missile';
+    '<span>Left thumb</span> — Thrust joystick<br>' +
+    '<span>Right thumb</span> — Rotate (long joystick, left/right)<br>' +
+    '<span>Autofire</span> — Plasma + missile auto-fire when enemy is on lead heading';
 }
 
 function loop(time) {

@@ -22,10 +22,9 @@ Open index.html in a browser. Click canvas to engage pointer lock.
 - Right click: missile (slow, powerful, drains missile bar)
 
 ### Mobile (touch)
-- Left-thumb drag in bottom-left zone: floating joystick → WASD thrust (appears at first touch point, 55 px max deflection)
-- Right-side drag anywhere else: rotates ship (feeds `mouseDX`, 1.5× sensitivity)
-- **FIRE** button (bottom-right): plasma bolt
-- **MSL** button (bottom-right): missile
+- Left-thumb drag in bottom-left zone (`x < 40% W, y > 50% H`): floating thrust joystick (appears at touch point, 55 px max deflection)
+- Right-thumb drag in bottom-right zone (`x > 60% W, y > 50% H`): floating rotation joystick — horizontal deflection only, pill-shaped (90×190 px), rate-based at `RJOY_RATE = 0.1` rad/s/px (dt-correct)
+- **Autofire**: fires automatically when an enemy is within `AUTOFIRE_ARC = 0.22 rad` (~12.5°) of the lead-shot heading. Sequence: plasma → plasma → missile → repeat (`mobileAutoSeq`). If the missile slot is unavailable (energy/cooldown), falls back to plasma and resets the sequence.
 
 ## Code structure (inside `<script>`)
 
@@ -34,7 +33,7 @@ Open index.html in a browser. Click canvas to engage pointer lock.
 - `isMobile` — detected via `matchMedia('(pointer: coarse) and (hover: none)')`. Reliable on touch-primary devices; correctly `false` on touchscreen laptops where the mouse is still the primary pointer. Controls `MAX_PARTICLES` cap (120 vs 300) and glow suppression.
 - `initGame()`, `makeStars()`, `makePlanets()`, `nextWave()`
 - `spawnEnemy()`, `spawnAlly()`, `safeSpawnPoint()`
-- `mobileSetup()` — registers all touch handlers once at startup; no-ops on desktop. `showMobileControls(show)` shows/hides the joystick base and FIRE/MSL buttons. `updateJoystickVisual(dx, dy)` moves the stick knob and is also called from `resetInputState()` to snap it back to centre.
+- `mobileSetup()` — registers all touch handlers once at startup; no-ops on desktop. `showMobileControls(show)` hides both joystick bases on `show=false` (no-op on `true` — joysticks are floating and appear on demand). `updateJoystickVisual(dx, dy)` moves the left stick knob and is called from `resetInputState()` to snap it back to centre. `updateRJoyVisual(dx)` moves the right stick knob horizontally.
 
 ### Shared helpers
 - `screenShake()`, `spawnParticles()`, `spawnExhaust()`
