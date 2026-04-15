@@ -291,7 +291,7 @@ function safeSpawnPoint(baseDist) {
 }
 
 function spawnAlly() {
-  let pos = safeSpawnPoint(Math.max(W, H) * 0.5 + 50);
+  let pos = safeSpawnPoint(Math.max(W, H) / viewZoom * 0.5 + 50);
   allies.push({
     x: pos.x, y: pos.y, vx: 0, vy: 0, angle: 0,
     hp: 60, maxHp: 60, radius: 14, speed: 180,
@@ -304,7 +304,7 @@ function spawnAlly() {
 }
 
 function spawnEnemy() {
-  let pos = safeSpawnPoint(Math.max(W, H) * 0.7 + 100);
+  let pos = safeSpawnPoint(Math.max(W, H) / viewZoom * 0.7 + 100);
   let diff = Math.min(wave, 20);
   let roll = Math.random();
   let type;
