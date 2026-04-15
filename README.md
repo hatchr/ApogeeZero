@@ -6,7 +6,7 @@ A 2D top-down spaceship survival game with endless waves, built entirely in a si
 
 Open `index.html` in any modern browser. Click the canvas to start.
 
-**[Play on GitHub Pages](https://chatcher.github.io/ApogeeZero/)**
+**[Play on GitHub Pages](https://hatchr.github.io/ApogeeZero/)**
 
 ## Screenshots
 
@@ -50,6 +50,7 @@ Open `index.html` in any modern browser. Click the canvas to start.
 | Shield | Blue | 8s invulnerability |
 | Spread Shot | Magenta | 10s triple plasma + 6x recharge rate |
 | EMP | Yellow | 6s — disables all non-player ships, shockwave animation |
+| Homing Missiles | Orange | 12s — missiles steer toward nearest enemy, 2x missile recharge |
 
 ## Tech
 
