@@ -61,12 +61,12 @@ canvas { display: block; }
   top: 50%; left: 50%; transform: translate(-50%,-50%);
 }
 #rJoyBase {
-  display: none; position: fixed; width: 90px; height: 190px; border-radius: 45px;
+  display: none; position: fixed; width: 120px; height: 60px; border-radius: 30px;
   border: 2px solid rgba(0,255,0,0.2); background: rgba(0,255,0,0.04);
   z-index: 6; pointer-events: none; overflow: hidden;
 }
 #rJoyStick {
-  position: absolute; width: 48px; height: 48px; border-radius: 50%;
+  position: absolute; width: 50px; height: 50px; border-radius: 50%;
   background: rgba(0,200,100,0.3); border: 2px solid #0c6;
   top: 50%; left: 50%; transform: translate(-50%, -50%);
 }
@@ -136,6 +136,8 @@ function resetInputState() {
   mJoyId = null; mRJoyId = null; mRJoyDX = 0; mobileAutoSeq = 0;
   updateJoystickVisual(0, 0);
   updateRJoyVisual(0);
+  let lb = document.getElementById('joystickBase'); if (lb) lb.style.display = 'none';
+  let rb = document.getElementById('rJoyBase');     if (rb) rb.style.display = 'none';
 }
 
 window.addEventListener('blur', resetInputState);
@@ -384,7 +386,7 @@ function damagePlayer(amount) {
     spawnParticles(player.x, player.y, '#fff', 15, 200);
     screenShake(0.3);
     if (lives <= 0) { gameOver(); }
-    else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; }
+    else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; resetInputState(); }
   }
 }
 
@@ -625,7 +627,7 @@ function updatePhysics(dt) {
       spawnParticles(player.x, player.y, '#0ff', 30, 250);
       spawnParticles(player.x, player.y, '#fff', 15, 200);
       screenShake(0.3);
-      if (lives <= 0) { gameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; }
+      if (lives <= 0) { gameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; resetInputState(); }
     }
 
     // Enemies
@@ -1770,8 +1772,8 @@ function mobileSetup() {
         mRJoyBX = x;
         mRJoyDX = 0;
         let base = document.getElementById('rJoyBase');
-        base.style.left   = (x - 45) + 'px';
-        base.style.top    = (t.clientY - 95) + 'px';
+        base.style.left   = (x - 60) + 'px';
+        base.style.top    = (t.clientY - 30) + 'px';
         base.style.bottom = 'auto';
         base.style.display = 'block';
         updateRJoyVisual(0);
@@ -1783,6 +1785,28 @@ function mobileSetup() {
     if (!gameRunning) return;
     e.preventDefault();
     for (let t of e.changedTouches) {
+      let x = t.clientX, y = t.clientY;
+      // Re-adopt a still-pressed finger whose ID was cleared by resetInputState on respawn
+      if (mJoyId === null && x < W * 0.4 && y > H * 0.5) {
+        mJoyId = t.identifier;
+        mJoyBX = x; mJoyBY = y;
+        let base = document.getElementById('joystickBase');
+        base.style.left = (x - 60) + 'px';
+        base.style.top  = (y - 60) + 'px';
+        base.style.bottom = 'auto';
+        base.style.display = 'block';
+        updateJoystickVisual(0, 0);
+      } else if (mRJoyId === null && x > W * 0.6 && y > H * 0.5) {
+        mRJoyId = t.identifier;
+        mRJoyBX = x;
+        mRJoyDX = 0;
+        let base = document.getElementById('rJoyBase');
+        base.style.left   = (x - 60) + 'px';
+        base.style.top    = (y - 30) + 'px';
+        base.style.bottom = 'auto';
+        base.style.display = 'block';
+        updateRJoyVisual(0);
+      }
       if (t.identifier === mJoyId) {
         let dx = t.clientX - mJoyBX, dy = t.clientY - mJoyBY;
         let len = Math.sqrt(dx*dx + dy*dy);
@@ -1804,6 +1828,11 @@ function mobileSetup() {
   }, { passive: false });
 
   function endTouch(e) {
+    if (!gameRunning) {
+      document.getElementById('joystickBase').style.display = 'none';
+      document.getElementById('rJoyBase').style.display = 'none';
+      return;
+    }
     for (let t of e.changedTouches) {
       if (t.identifier === mJoyId) {
         mJoyId = null;
