@@ -869,7 +869,7 @@ function updatePlayer(dt) {
       fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
     }
     plasmaEnergy -= pCost;
-    plasmaCD = 0.1;
+    plasmaCD = 0.15;
     sndPlasma(true);
   }
   if (rightDown && missileCD <= 0 && missileEnergy >= missileCost) {
@@ -881,11 +881,10 @@ function updatePlayer(dt) {
     sndMissileFire();
   }
 
-  // Mobile autofire: plasma → plasma → missile, repeat.
-  // Uses leadShot to account for both ship and target velocity and the
-  // speed difference between plasma (600) and missile (300).
+  // Mobile autofire: plasma → plasma → plasma → missile, repeat.
+  // Uses leadShot to account for both ship and target velocity.
   if (isMobile && enemies.length > 0) {
-    let useDef = mobileAutoSeq < 2 ? PROJECTILE_DEFS.plasma : PROJECTILE_DEFS.missile;
+    let useDef = mobileAutoSeq < 3 ? PROJECTILE_DEFS.plasma : PROJECTILE_DEFS.missile;
     let useSpeed = useDef.speed;
     let useRange = useDef.speed * useDef.life;
     let onTarget = false;
@@ -912,10 +911,10 @@ function updatePlayer(dt) {
           fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
         }
         plasmaEnergy -= plasmaFireCost;
-        plasmaCD = 0.1;
+        plasmaCD = 0.15;
         sndPlasma(true);
       };
-      if (mobileAutoSeq < 2) {
+      if (mobileAutoSeq < 3) {
         if (plasmaCD <= 0 && plasmaEnergy >= plasmaFireCost) {
           firePlasma();
           mobileAutoSeq++;
@@ -1563,11 +1562,11 @@ function draw() {
   // Projectiles
   for (let p of projectiles) {
     ctx.fillStyle = p.color;
-    glow(4, p.color);
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.radius, 0, Math.PI*2);
     ctx.fill();
     if (p.radius >= 5) {
+      glow(4, p.color);
       // Missile — draw a tail
       ctx.strokeStyle = p.color;
       ctx.lineWidth = 2;

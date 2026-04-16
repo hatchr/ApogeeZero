@@ -24,7 +24,7 @@ Open index.html in a browser. Click canvas to engage pointer lock.
 ### Mobile (touch)
 - Left-thumb drag in bottom-left zone (`x < 40% W, y > 50% H`): floating thrust joystick (appears at touch point, 55 px max deflection)
 - Right-thumb drag in bottom-right zone (`x > 60% W, y > 50% H`): floating rotation joystick — horizontal deflection only, pill-shaped (90×190 px), rate-based at `RJOY_RATE = 0.1` rad/s/px (dt-correct)
-- **Autofire**: fires automatically when an enemy is within `AUTOFIRE_ARC = 0.22 rad` (~12.5°) of the lead-shot heading. Sequence: plasma → plasma → missile → repeat (`mobileAutoSeq`). If the missile slot is unavailable (energy/cooldown), falls back to plasma and resets the sequence.
+- **Autofire**: fires automatically when an enemy is within `AUTOFIRE_ARC = 0.22 rad` (~12.5°) of the lead-shot heading. Sequence: plasma → plasma → plasma → missile → repeat (`mobileAutoSeq`). If the missile slot is unavailable (energy/cooldown), falls back to plasma and resets the sequence.
 
 ## Code structure (inside `<script>`)
 
@@ -124,5 +124,23 @@ Powerups gravitate toward the player from any distance (inverse-square pull).
 - Leaderboard save UI only shown if score qualifies for top 5
 
 ### Ammo
-- Plasma: 100 energy, costs 5/shot (15 for spread), recharges 15/sec (90/sec during spread)
+- Plasma: 100 energy, costs 5/shot (15 for spread), recharges 15/sec (90/sec during spread), cooldown 0.15s/shot
 - Missiles: 100 energy, costs 20/shot, recharges 8/sec (16/sec during homing)
+
+### Audio
+All sounds are synthesized via Web Audio API — no audio files. `AudioContext` (`_ac`) is lazily initialized on the first START GAME / PLAY AGAIN click to comply with browser autoplay policy.
+
+Helpers:
+- `_tone(f0, f1, dur, vol, type)` — sweeping oscillator burst
+- `_noise(ftype, freq, dur, vol, Q)` — filtered noise burst (reuses a cached 0.5s white-noise buffer `_nBuf`)
+- `_fm(carFreq, modFreq, modDepth, dur, vol)` — FM synthesis (sine carrier modulated by sine)
+
+Sound functions:
+- `sndPlasma(isPlayer)` — FM buzz; player louder/higher than NPCs
+- `sndMissileFire()` — low sine thump + bandpass whoosh sweeping up
+- `sndHit(vol)` — lowpass thud + sine drop; called at 0.15 for NPC hits, 0.30 for player hits
+- `sndExplosion(big)` — noise burst; big = player death (long, low), small = NPC/ally death
+- `sndImpact()` — planet/asteroid collision thud
+- `sndPickup(type)` — ascending 3-note arpeggio, unique notes per powerup type
+- `sndEMP()` — bandpass crack + sawtooth sweep
+- `sndEngineUpdate(on)` — ramps a continuous bandpass noise chain in/out; called every frame from `updatePlayer`
