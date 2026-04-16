@@ -2000,7 +2000,7 @@ function mobileSetup() {
     for (let t of e.changedTouches) {
       let x = t.clientX, y = t.clientY;
       // Re-adopt a still-pressed finger whose ID was cleared by resetInputState on respawn
-      if (mJoyId === null && x < W * 0.4) {
+      if (mJoyId === null && x < W * 0.4 && t.identifier !== mRJoyId) {
         mJoyId = t.identifier;
         mJoyBX = x; mJoyBY = y;
         let base = document.getElementById('joystickBase');
@@ -2052,7 +2052,8 @@ function mobileSetup() {
         keys['w'] = keys['s'] = keys['a'] = keys['d'] = false;
         updateJoystickVisual(0, 0);
         document.getElementById('joystickBase').style.display = 'none';
-      } else if (t.identifier === mRJoyId) {
+      }
+      if (t.identifier === mRJoyId) {
         mRJoyId = null;
         mRJoyDX = 0;
         updateRJoyVisual(0);
