@@ -1125,6 +1125,9 @@ function updatePowerups(dt) {
     let force = 5000000 / (distSq + 500);
     pu.vx += nx * force * dt;
     pu.vy += ny * force * dt;
+    let damp = Math.pow(0.97, dt * 60);
+    pu.vx *= damp;
+    pu.vy *= damp;
     pu.x += pu.vx * dt;
     pu.y += pu.vy * dt;
     dx = player.x - pu.x; dy = player.y - pu.y;
