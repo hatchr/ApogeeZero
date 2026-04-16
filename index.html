@@ -124,9 +124,14 @@ function glow(blur, color) { if (!isMobile) { ctx.shadowBlur = blur; if (color) 
 let _ac = null, _nBuf = null, _engGain = null, _thrustOn = false;
 
 function _initAudio() {
-  if (_ac) return;
+  if (_ac) {
+    // iOS suspends the context between interactions — resume if needed
+    if (_ac.state === 'suspended') _ac.resume();
+    return;
+  }
   try {
     _ac = new (window.AudioContext || window.webkitAudioContext)();
+    _ac.resume(); // iOS starts contexts suspended
     // Build white-noise buffer (0.5 s, reused for all noise sources)
     const len = Math.ceil(_ac.sampleRate * 0.5);
     _nBuf = _ac.createBuffer(1, len, _ac.sampleRate);
@@ -1934,6 +1939,7 @@ function mobileSetup() {
   const JOY_L = 55; // left joystick max radius
   const JOY_R = 35; // right joystick max horizontal deflection
   window.addEventListener('touchstart', e => {
+    _initAudio();
     if (!gameRunning) return;
     for (let t of e.changedTouches) {
       let x = t.clientX, y = t.clientY;
