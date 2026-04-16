@@ -1930,9 +1930,9 @@ document.getElementById('submitScore').addEventListener('click', () => {
   document.getElementById('submitScore').textContent = 'SAVED';
 });
 
-document.getElementById('restartBtn').addEventListener('click', () => {
+function _doRestart() {
   _initAudio();
-  _primeAudio(); // always re-prime directly in the tap handler for iOS
+  _primeAudio();
   document.getElementById('gameOver').classList.remove('active');
   document.getElementById('submitScore').disabled = false;
   document.getElementById('submitScore').textContent = 'SAVE SCORE';
@@ -1941,16 +1941,28 @@ document.getElementById('restartBtn').addEventListener('click', () => {
   initGame();
   showMobileControls(true);
   gameRunning = true;
-});
+}
+// touchstart fires earlier than click and e.preventDefault() stops the
+// subsequent synthetic click on iOS, preventing double-invocation.
+document.getElementById('restartBtn').addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  _doRestart();
+}, { passive: false });
+document.getElementById('restartBtn').addEventListener('click', _doRestart);
 
-document.getElementById('startBtn').addEventListener('click', () => {
+function _doStart() {
   _initAudio();
-  _primeAudio(); // always re-prime directly in the tap handler for iOS
+  _primeAudio();
   document.getElementById('startScreen').classList.add('hidden');
   initGame();
   showMobileControls(true);
   gameRunning = true;
+}
+document.getElementById('startBtn').addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  _doStart();
 }, { passive: false });
+document.getElementById('startBtn').addEventListener('click', _doStart);
 
 function updateJoystickVisual(dx, dy) {
   let stick = document.getElementById('joystickStick');
