@@ -732,9 +732,13 @@ function updatePlayer(dt) {
   // Uses leadShot to account for both ship and target velocity and the
   // speed difference between plasma (600) and missile (300).
   if (isMobile && enemies.length > 0) {
-    let useSpeed = mobileAutoSeq < 2 ? PROJECTILE_DEFS.plasma.speed : PROJECTILE_DEFS.missile.speed;
+    let useDef = mobileAutoSeq < 2 ? PROJECTILE_DEFS.plasma : PROJECTILE_DEFS.missile;
+    let useSpeed = useDef.speed;
+    let useRange = useDef.speed * useDef.life;
     let onTarget = false;
     for (let e of enemies) {
+      let edx = e.x - player.x, edy = e.y - player.y;
+      if (edx*edx + edy*edy > useRange * useRange) continue;
       let la = leadShot(player.x, player.y, player.vx, player.vy,
                         e.x, e.y, e.vx || 0, e.vy || 0, useSpeed);
       let d = la - player.angle;
