@@ -123,15 +123,40 @@ function glow(blur, color) { if (!isMobile) { ctx.shadowBlur = blur; if (color) 
 // ─── Audio System ────────────────────────────────────────────────────────────
 let _ac = null, _nBuf = null, _engGain = null, _thrustOn = false;
 
+function _primeAudio() {
+  if (!_ac) return;
+  if (_ac.state !== 'running') _ac.resume().catch(() => {});
+  try {
+    const src = _ac.createBufferSource();
+    src.buffer = _ac.createBuffer(1, 1, _ac.sampleRate);
+    const gain = _ac.createGain();
+    gain.gain.value = 0;
+    src.connect(gain);
+    gain.connect(_ac.destination);
+    src.start();
+  } catch(e) {}
+}
+
+function _bindAudioUnlockHandlers() {
+  const evts = ['pointerdown', 'touchstart', 'touchend', 'keydown'];
+  const unlock = () => {
+    _initAudio();
+    _primeAudio();
+    // Remove handlers once the context is confirmed running
+    if (_ac && _ac.state === 'running')
+      evts.forEach(evt => window.removeEventListener(evt, unlock));
+  };
+  evts.forEach(evt => window.addEventListener(evt, unlock, { passive: true }));
+}
+
 function _initAudio() {
   if (_ac) {
-    // iOS suspends the context between interactions — resume if needed
-    if (_ac.state === 'suspended') _ac.resume();
+    // iOS may suspend the context after backgrounding — resume if needed
+    if (_ac.state !== 'running') _primeAudio();
     return;
   }
   try {
     _ac = new (window.AudioContext || window.webkitAudioContext)();
-    _ac.resume(); // iOS starts contexts suspended
     // Build white-noise buffer (0.5 s, reused for all noise sources)
     const len = Math.ceil(_ac.sampleRate * 0.5);
     _nBuf = _ac.createBuffer(1, len, _ac.sampleRate);
@@ -144,6 +169,8 @@ function _initAudio() {
     _engGain  = _ac.createGain(); _engGain.gain.value = 0;
     src.connect(bp); bp.connect(lp); lp.connect(_engGain); _engGain.connect(_ac.destination);
     src.start();
+    // iOS requires scheduling audio within a user gesture to unlock the context
+    _primeAudio();
   } catch(e) {}
 }
 
@@ -290,6 +317,7 @@ function resetInputState() {
   updateRJoyVisual(0);
   let lb = document.getElementById('joystickBase'); if (lb) lb.style.display = 'none';
   let rb = document.getElementById('rJoyBase');     if (rb) rb.style.display = 'none';
+  sndEngineUpdate(false);
 }
 
 window.addEventListener('blur', resetInputState);
@@ -2049,6 +2077,7 @@ function loop(time) {
   draw();
   requestAnimationFrame(loop);
 }
+_bindAudioUnlockHandlers();
 mobileSetup();
 requestAnimationFrame(t => { lastTime = t; requestAnimationFrame(loop); });
 </script>
