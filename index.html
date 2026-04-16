@@ -125,15 +125,15 @@ let _ac = null, _nBuf = null, _engGain = null, _thrustOn = false;
 
 function _primeAudio() {
   if (!_ac) return;
-  if (_ac.state !== 'running') _ac.resume().catch(() => {});
+  _ac.resume().catch(() => {});
   try {
     const src = _ac.createBufferSource();
     src.buffer = _ac.createBuffer(1, 1, _ac.sampleRate);
     const gain = _ac.createGain();
-    gain.gain.value = 0;
+    gain.gain.value = 0.001; // tiny non-zero helps Safari recognise the node
     src.connect(gain);
     gain.connect(_ac.destination);
-    src.start();
+    src.start(0); // explicit time
   } catch(e) {}
 }
 
@@ -142,9 +142,15 @@ function _bindAudioUnlockHandlers() {
   const unlock = () => {
     _initAudio();
     _primeAudio();
-    // Remove handlers once the context is confirmed running
-    if (_ac && _ac.state === 'running')
-      evts.forEach(evt => window.removeEventListener(evt, unlock));
+    // Remove only after async resume confirms the context is running
+    if (_ac) {
+      _ac.onstatechange = () => {
+        if (_ac.state === 'running') {
+          evts.forEach(evt => window.removeEventListener(evt, unlock));
+          _ac.onstatechange = null;
+        }
+      };
+    }
   };
   evts.forEach(evt => window.addEventListener(evt, unlock, { passive: true }));
 }
@@ -176,7 +182,7 @@ function _initAudio() {
 
 // Synthesise a sweeping oscillator burst
 function _tone(f0, f1, dur, vol, type = 'square') {
-  if (!_ac || _ac.state !== 'running') return;
+  if (!_ac || _ac.state !== 'running') { _primeAudio(); return; }
   const t = _ac.currentTime;
   const osc = _ac.createOscillator(), g = _ac.createGain();
   osc.type = type;
@@ -191,7 +197,7 @@ function _tone(f0, f1, dur, vol, type = 'square') {
 
 // Synthesise a filtered noise burst
 function _noise(ftype, freq, dur, vol, Q = 1) {
-  if (!_ac || !_nBuf || _ac.state !== 'running') return;
+  if (!_ac || !_nBuf || _ac.state !== 'running') { _primeAudio(); return; }
   const t = _ac.currentTime;
   const src = _ac.createBufferSource(); src.buffer = _nBuf; src.loop = true;
   const filt = _ac.createBiquadFilter(); filt.type = ftype; filt.frequency.value = freq; filt.Q.value = Q;
@@ -205,7 +211,7 @@ function _noise(ftype, freq, dur, vol, Q = 1) {
 
 // FM synthesis: sine carrier modulated by a sine
 function _fm(carFreq, modFreq, modDepth, dur, vol) {
-  if (!_ac || _ac.state !== 'running') return;
+  if (!_ac || _ac.state !== 'running') { _primeAudio(); return; }
   const t = _ac.currentTime;
   const mod = _ac.createOscillator(), modG = _ac.createGain();
   const car = _ac.createOscillator(), g = _ac.createGain();
@@ -223,7 +229,7 @@ function sndPlasma(isPlayer) {
   _fm(isPlayer ? 550 : 380, isPlayer ? 140 : 95, isPlayer ? 400 : 260, isPlayer ? 0.08 : 0.09, isPlayer ? 0.15 : 0.065);
 }
 function sndMissileFire() {
-  if (!_ac || _ac.state !== 'running') return;
+  if (!_ac || _ac.state !== 'running') { _primeAudio(); return; }
   _tone(120, 35, 0.18, 0.38, 'sine');
   // Whoosh tail: bandpass noise sweeping up in frequency
   const t = _ac.currentTime;
@@ -247,7 +253,7 @@ function sndExplosion(big) {
   if (big) _tone(75, 28, 0.8, 0.28, 'sine');
 }
 function sndPickup(type) {
-  if (!_ac || _ac.state !== 'running') return;
+  if (!_ac || _ac.state !== 'running') { _primeAudio(); return; }
   const map = { health:[440,554,659], shield:[523,659,784], spread:[392,494,587], homing:[330,415,494], emp:[880,440,220] };
   (map[type] || [440,554,659]).forEach((f, i) => {
     const t = _ac.currentTime + i * 0.07;
@@ -269,6 +275,7 @@ function sndEMP() {
   _tone(1400, 35, 0.65, 0.32, 'sawtooth');
 }
 function sndEngineUpdate(on) {
+  if (!_ac || _ac.state !== 'running') { _primeAudio(); return; }
   if (!_engGain || on === _thrustOn) return;
   _thrustOn = on;
   const t = _ac.currentTime;
@@ -1925,6 +1932,7 @@ document.getElementById('submitScore').addEventListener('click', () => {
 
 document.getElementById('restartBtn').addEventListener('click', () => {
   _initAudio();
+  _primeAudio(); // always re-prime directly in the tap handler for iOS
   document.getElementById('gameOver').classList.remove('active');
   document.getElementById('submitScore').disabled = false;
   document.getElementById('submitScore').textContent = 'SAVE SCORE';
@@ -1937,11 +1945,12 @@ document.getElementById('restartBtn').addEventListener('click', () => {
 
 document.getElementById('startBtn').addEventListener('click', () => {
   _initAudio();
+  _primeAudio(); // always re-prime directly in the tap handler for iOS
   document.getElementById('startScreen').classList.add('hidden');
   initGame();
   showMobileControls(true);
   gameRunning = true;
-});
+}, { passive: false });
 
 function updateJoystickVisual(dx, dy) {
   let stick = document.getElementById('joystickStick');
