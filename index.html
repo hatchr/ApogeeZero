@@ -219,7 +219,7 @@ function makePlanets() {
     do {
       x = (Math.random() - 0.5) * 3000;
       y = (Math.random() - 0.5) * 3000;
-      tooClose = (x*x + y*y) < 400*400;
+      tooClose = (x*x + y*y) < (r + 600) * (r + 600);
       for (let p of planets) {
         let ddx = x - p.x, ddy = y - p.y;
         if (Math.sqrt(ddx*ddx + ddy*ddy) < r + p.radius + 150) tooClose = true;
