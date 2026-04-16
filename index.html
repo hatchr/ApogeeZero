@@ -157,6 +157,8 @@ function _initAudio() {
   }
   try {
     _ac = new (window.AudioContext || window.webkitAudioContext)();
+    // iOS requires resume + a silent buffer start before any other nodes start
+    _primeAudio();
     // Build white-noise buffer (0.5 s, reused for all noise sources)
     const len = Math.ceil(_ac.sampleRate * 0.5);
     _nBuf = _ac.createBuffer(1, len, _ac.sampleRate);
@@ -169,14 +171,12 @@ function _initAudio() {
     _engGain  = _ac.createGain(); _engGain.gain.value = 0;
     src.connect(bp); bp.connect(lp); lp.connect(_engGain); _engGain.connect(_ac.destination);
     src.start();
-    // iOS requires scheduling audio within a user gesture to unlock the context
-    _primeAudio();
   } catch(e) {}
 }
 
 // Synthesise a sweeping oscillator burst
 function _tone(f0, f1, dur, vol, type = 'square') {
-  if (!_ac) return;
+  if (!_ac || _ac.state !== 'running') return;
   const t = _ac.currentTime;
   const osc = _ac.createOscillator(), g = _ac.createGain();
   osc.type = type;
@@ -191,7 +191,7 @@ function _tone(f0, f1, dur, vol, type = 'square') {
 
 // Synthesise a filtered noise burst
 function _noise(ftype, freq, dur, vol, Q = 1) {
-  if (!_ac || !_nBuf) return;
+  if (!_ac || !_nBuf || _ac.state !== 'running') return;
   const t = _ac.currentTime;
   const src = _ac.createBufferSource(); src.buffer = _nBuf; src.loop = true;
   const filt = _ac.createBiquadFilter(); filt.type = ftype; filt.frequency.value = freq; filt.Q.value = Q;
@@ -205,7 +205,7 @@ function _noise(ftype, freq, dur, vol, Q = 1) {
 
 // FM synthesis: sine carrier modulated by a sine
 function _fm(carFreq, modFreq, modDepth, dur, vol) {
-  if (!_ac) return;
+  if (!_ac || _ac.state !== 'running') return;
   const t = _ac.currentTime;
   const mod = _ac.createOscillator(), modG = _ac.createGain();
   const car = _ac.createOscillator(), g = _ac.createGain();
@@ -223,7 +223,7 @@ function sndPlasma(isPlayer) {
   _fm(isPlayer ? 550 : 380, isPlayer ? 140 : 95, isPlayer ? 400 : 260, isPlayer ? 0.08 : 0.09, isPlayer ? 0.15 : 0.065);
 }
 function sndMissileFire() {
-  if (!_ac) return;
+  if (!_ac || _ac.state !== 'running') return;
   _tone(120, 35, 0.18, 0.38, 'sine');
   // Whoosh tail: bandpass noise sweeping up in frequency
   const t = _ac.currentTime;
@@ -247,7 +247,7 @@ function sndExplosion(big) {
   if (big) _tone(75, 28, 0.8, 0.28, 'sine');
 }
 function sndPickup(type) {
-  if (!_ac) return;
+  if (!_ac || _ac.state !== 'running') return;
   const map = { health:[440,554,659], shield:[523,659,784], spread:[392,494,587], homing:[330,415,494], emp:[880,440,220] };
   (map[type] || [440,554,659]).forEach((f, i) => {
     const t = _ac.currentTime + i * 0.07;
