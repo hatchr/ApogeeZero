@@ -119,6 +119,132 @@ const ctx = canvas.getContext('2d');
 const isMobile = window.matchMedia('(pointer: coarse) and (hover: none)').matches;
 const MAX_PARTICLES = isMobile ? 120 : 300;
 function glow(blur, color) { if (!isMobile) { ctx.shadowBlur = blur; if (color) ctx.shadowColor = color; } }
+
+// ─── Audio System ────────────────────────────────────────────────────────────
+let _ac = null, _nBuf = null, _engGain = null, _thrustOn = false;
+
+function _initAudio() {
+  if (_ac) return;
+  try {
+    _ac = new (window.AudioContext || window.webkitAudioContext)();
+    // Build white-noise buffer (0.5 s, reused for all noise sources)
+    const len = Math.ceil(_ac.sampleRate * 0.5);
+    _nBuf = _ac.createBuffer(1, len, _ac.sampleRate);
+    const d = _nBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    // Continuous engine noise chain — gain starts at 0
+    const src = _ac.createBufferSource(); src.buffer = _nBuf; src.loop = true;
+    const bp  = _ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 110; bp.Q.value = 1.2;
+    const lp  = _ac.createBiquadFilter(); lp.type = 'lowpass';  lp.frequency.value = 400;
+    _engGain  = _ac.createGain(); _engGain.gain.value = 0;
+    src.connect(bp); bp.connect(lp); lp.connect(_engGain); _engGain.connect(_ac.destination);
+    src.start();
+  } catch(e) {}
+}
+
+// Synthesise a sweeping oscillator burst
+function _tone(f0, f1, dur, vol, type = 'square') {
+  if (!_ac) return;
+  const t = _ac.currentTime;
+  const osc = _ac.createOscillator(), g = _ac.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(f0, t);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(f1, 1), t + dur);
+  g.gain.setValueAtTime(0.001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  osc.connect(g); g.connect(_ac.destination);
+  osc.start(t); osc.stop(t + dur);
+}
+
+// Synthesise a filtered noise burst
+function _noise(ftype, freq, dur, vol, Q = 1) {
+  if (!_ac || !_nBuf) return;
+  const t = _ac.currentTime;
+  const src = _ac.createBufferSource(); src.buffer = _nBuf; src.loop = true;
+  const filt = _ac.createBiquadFilter(); filt.type = ftype; filt.frequency.value = freq; filt.Q.value = Q;
+  const g = _ac.createGain();
+  g.gain.setValueAtTime(0.001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.01);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  src.connect(filt); filt.connect(g); g.connect(_ac.destination);
+  src.start(t); src.stop(t + dur);
+}
+
+// FM synthesis: sine carrier modulated by a sine
+function _fm(carFreq, modFreq, modDepth, dur, vol) {
+  if (!_ac) return;
+  const t = _ac.currentTime;
+  const mod = _ac.createOscillator(), modG = _ac.createGain();
+  const car = _ac.createOscillator(), g = _ac.createGain();
+  mod.frequency.value = modFreq; modG.gain.value = modDepth;
+  mod.connect(modG); modG.connect(car.frequency);
+  car.type = 'sine'; car.frequency.value = carFreq;
+  g.gain.setValueAtTime(0.001, t);
+  g.gain.exponentialRampToValueAtTime(vol, t + 0.005);
+  g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+  car.connect(g); g.connect(_ac.destination);
+  mod.start(t); mod.stop(t + dur);
+  car.start(t); car.stop(t + dur);
+}
+function sndPlasma(isPlayer) {
+  _fm(isPlayer ? 550 : 380, isPlayer ? 140 : 95, isPlayer ? 400 : 260, isPlayer ? 0.08 : 0.09, isPlayer ? 0.15 : 0.065);
+}
+function sndMissileFire() {
+  if (!_ac) return;
+  _tone(120, 35, 0.18, 0.38, 'sine');
+  // Whoosh tail: bandpass noise sweeping up in frequency
+  const t = _ac.currentTime;
+  const src = _ac.createBufferSource(); src.buffer = _nBuf; src.loop = true;
+  const filt = _ac.createBiquadFilter(); filt.type = 'bandpass'; filt.Q.value = 1.8;
+  filt.frequency.setValueAtTime(150, t + 0.05);
+  filt.frequency.exponentialRampToValueAtTime(900, t + 0.35);
+  const ng = _ac.createGain();
+  ng.gain.setValueAtTime(0, t);
+  ng.gain.linearRampToValueAtTime(0.22, t + 0.08);
+  ng.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+  src.connect(filt); filt.connect(ng); ng.connect(_ac.destination);
+  src.start(t); src.stop(t + 0.35);
+}
+function sndHit(vol) {
+  _noise('lowpass', 550, 0.12, vol);
+  _tone(220, 70, 0.12, vol * 0.7, 'sine');
+}
+function sndExplosion(big) {
+  _noise('lowpass', big ? 160 : 320, big ? 0.8 : 0.35, big ? 0.55 : 0.32);
+  if (big) _tone(75, 28, 0.8, 0.28, 'sine');
+}
+function sndPickup(type) {
+  if (!_ac) return;
+  const map = { health:[440,554,659], shield:[523,659,784], spread:[392,494,587], homing:[330,415,494], emp:[880,440,220] };
+  (map[type] || [440,554,659]).forEach((f, i) => {
+    const t = _ac.currentTime + i * 0.07;
+    const osc = _ac.createOscillator(), g = _ac.createGain();
+    osc.type = 'sine'; osc.frequency.value = f;
+    g.gain.setValueAtTime(0.001, t);
+    g.gain.exponentialRampToValueAtTime(0.28, t + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    osc.connect(g); g.connect(_ac.destination);
+    osc.start(t); osc.stop(t + 0.2);
+  });
+}
+function sndImpact() {
+  _noise('lowpass', 380, 0.18, 0.30);
+  _tone(140, 45, 0.16, 0.22, 'sine');
+}
+function sndEMP() {
+  _noise('bandpass', 1600, 0.65, 0.45, 3.5);
+  _tone(1400, 35, 0.65, 0.32, 'sawtooth');
+}
+function sndEngineUpdate(on) {
+  if (!_engGain || on === _thrustOn) return;
+  _thrustOn = on;
+  const t = _ac.currentTime;
+  _engGain.gain.cancelScheduledValues(t);
+  _engGain.gain.setValueAtTime(_engGain.gain.value, t);
+  _engGain.gain.linearRampToValueAtTime(on ? 0.20 : 0, t + (on ? 0.06 : 0.15));
+}
+// ─────────────────────────────────────────────────────────────────────────────
 let W, H, viewZoom = 1;
 function resize() {
   W = canvas.width = window.innerWidth;
@@ -406,8 +532,11 @@ function damagePlayer(amount) {
     spawnParticles(player.x, player.y, '#0ff', 30, 250);
     spawnParticles(player.x, player.y, '#fff', 15, 200);
     screenShake(0.3);
+    sndExplosion(true);
     if (lives <= 0) { gameOver(); }
     else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; resetInputState(); }
+  } else {
+    sndHit(0.30);
   }
 }
 
@@ -424,6 +553,7 @@ function handlePlanetCollision(obj, pl) {
       let dmg = Math.max(3, Math.floor(impactSpeed * 0.15));
       obj.hp -= dmg;
       spawnParticles(obj.x, obj.y, pl.glow, obj === player ? 6 : 4, obj === player ? 80 : 60);
+      sndImpact();
       if (obj.hp <= 0) return true;
     }
   }
@@ -526,6 +656,7 @@ function aimAndShoot(ship, target, dt) {
   let fx = ship.x + Math.cos(ship.angle) * w.muzzle;
   let fy = ship.y + Math.sin(ship.angle) * w.muzzle;
   fireProjectile(w.owner, fx, fy, ship.angle, w.projectile, ship.vx, ship.vy);
+  if (w.projectile === 'missile') sndMissileFire(); else sndPlasma(false);
   ship.shootCD = w.cdMin + Math.random() * w.cdSpan;
 }
 
@@ -658,6 +789,7 @@ function updatePhysics(dt) {
         score += e.score;
         spawnParticles(e.x, e.y, e.color, 20, 200);
         screenShake(0.1);
+        sndExplosion(false);
         enemies.splice(i, 1);
         enemiesAlive--;
       }
@@ -668,6 +800,7 @@ function updatePhysics(dt) {
       let a = allies[i];
       if (handlePlanetCollision(a, pl)) {
         spawnParticles(a.x, a.y, '#0ff', 20, 200);
+        sndExplosion(false);
         allies.splice(i, 1);
       }
     }
@@ -697,6 +830,9 @@ function updatePlayer(dt) {
   let damp = Math.pow(0.99, dt * 60);
   player.vx *= damp; player.vy *= damp;
   player.x += player.vx * dt; player.y += player.vy * dt;
+
+  // Engine sound — on when any thrust key active
+  sndEngineUpdate(!!(keys['w'] || keys['s'] || keys['a'] || keys['d']));
 
   // Engine particles (player-specific: 2 particles with different timing/size)
   if (keys['w']) {
@@ -734,6 +870,7 @@ function updatePlayer(dt) {
     }
     plasmaEnergy -= pCost;
     plasmaCD = 0.1;
+    sndPlasma(true);
   }
   if (rightDown && missileCD <= 0 && missileEnergy >= missileCost) {
     let fx = player.x + Math.cos(player.angle)*20;
@@ -741,6 +878,7 @@ function updatePlayer(dt) {
     fireProjectile('player', fx, fy, player.angle, 'missile', player.vx, player.vy, { homing: homingTimer > 0 });
     missileEnergy -= missileCost;
     missileCD = 0.5;
+    sndMissileFire();
   }
 
   // Mobile autofire: plasma → plasma → missile, repeat.
@@ -775,6 +913,7 @@ function updatePlayer(dt) {
         }
         plasmaEnergy -= plasmaFireCost;
         plasmaCD = 0.1;
+        sndPlasma(true);
       };
       if (mobileAutoSeq < 2) {
         if (plasmaCD <= 0 && plasmaEnergy >= plasmaFireCost) {
@@ -787,6 +926,7 @@ function updatePlayer(dt) {
           missileEnergy -= missileCost;
           missileCD = 0.5;
           mobileAutoSeq = 0;
+          sndMissileFire();
         } else if (plasmaCD <= 0 && plasmaEnergy >= plasmaFireCost) {
           firePlasma();
           mobileAutoSeq = 0;
@@ -951,11 +1091,13 @@ function updateProjectiles(dt) {
           e.hp -= p.dmg;
           spawnParticles(p.x, p.y, e.color, 5, 100);
           projectiles.splice(i, 1); hit = true;
+          sndHit(0.15);
           if (e.hp <= 0) {
             if (p.owner === 'player') score += e.score;
             spawnParticles(e.x, e.y, e.color, 20, 200);
             spawnParticles(e.x, e.y, '#ff0', 10, 150);
             screenShake(0.15);
+            sndExplosion(false);
             if (Math.random() < 0.2) {
               let types = ['health', 'shield', 'spread', 'emp', 'homing'];
               let t = types[Math.floor(Math.random() * types.length)];
@@ -981,6 +1123,7 @@ function updateProjectiles(dt) {
           projectiles.splice(i, 1); hit = true;
           if (a.hp <= 0) {
             spawnParticles(a.x, a.y, '#0ff', 20, 200);
+            sndExplosion(false);
             allies.splice(j, 1);
           }
           break;
@@ -1016,6 +1159,7 @@ function updateProjectiles(dt) {
           projectiles.splice(i, 1); hit = true;
           if (a.hp <= 0) {
             spawnParticles(a.x, a.y, '#0ff', 20, 200);
+            sndExplosion(false);
             allies.splice(j, 1);
           }
           break;
@@ -1073,7 +1217,7 @@ function updateCollisions(dt) {
         let dmg = Math.max(2, Math.floor(impactSpeed * 0.08));
         a.hp -= dmg;
         spawnParticles(a.x, a.y, '#0c6', 4, 60);
-        if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); allies.splice(i, 1); }
+        if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); sndExplosion(false); allies.splice(i, 1); }
         damagePlayer(dmg);
       }
     }
@@ -1097,7 +1241,7 @@ function updateCollisions(dt) {
           score += e.score;
           enemies.splice(j, 1);
           enemiesAlive--;
-          if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); allies.splice(i, 1); allyDead = true; }
+          if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); sndExplosion(false); allies.splice(i, 1); allyDead = true; }
           if (allyDead) break;
           continue;
         }
@@ -1111,7 +1255,7 @@ function updateCollisions(dt) {
         a.hp -= 10;
         e.hp -= 10;
         spawnParticles((a.x+e.x)/2, (a.y+e.y)/2, '#ff0', 6, 80);
-        if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); allies.splice(i, 1); allyDead = true; }
+        if (a.hp <= 0) { spawnParticles(a.x, a.y, '#0ff', 20, 200); sndExplosion(false); allies.splice(i, 1); allyDead = true; }
         if (e.hp <= 0) {
           score += e.score;
           spawnParticles(e.x, e.y, e.color, 20, 200);
@@ -1155,15 +1299,19 @@ function updatePowerups(dt) {
       if (pu.type === 'health') {
         player.hp = Math.min(player.maxHp, player.hp + 40);
         spawnParticles(pu.x, pu.y, '#0f0', 10, 80);
+        sndPickup('health');
       } else if (pu.type === 'shield') {
         shieldTimer = 8;
         spawnParticles(pu.x, pu.y, '#48f', 10, 80);
+        sndPickup('shield');
       } else if (pu.type === 'spread') {
         spreadTimer = 10;
         spawnParticles(pu.x, pu.y, '#f0f', 10, 80);
+        sndPickup('spread');
       } else if (pu.type === 'homing') {
         homingTimer = 12;
         spawnParticles(pu.x, pu.y, '#f60', 10, 80);
+        sndPickup('homing');
       } else if (pu.type === 'emp') {
         empTimer = 6;
         // Assign random spin to all enemies and allies
@@ -1172,6 +1320,7 @@ function updatePowerups(dt) {
         spawnParticles(player.x, player.y, '#ff0', 30, 200);
         spawnParticles(player.x, player.y, '#fff', 15, 150);
         screenShake(0.4);
+        sndEMP();
         empWave = 0; empWaveMax = 2000;
       }
       powerups.splice(i, 1);
@@ -1671,6 +1820,7 @@ function gameOver() {
   gameRunning = false;
   gameOverActive = true;
   resetInputState();
+  sndEngineUpdate(false);
   showMobileControls(false);
   setTimeout(() => document.exitPointerLock?.(), 0);
   document.getElementById('finalScore').textContent = 'Score: ' + score;
@@ -1742,6 +1892,7 @@ document.getElementById('submitScore').addEventListener('click', () => {
 });
 
 document.getElementById('restartBtn').addEventListener('click', () => {
+  _initAudio();
   document.getElementById('gameOver').classList.remove('active');
   document.getElementById('submitScore').disabled = false;
   document.getElementById('submitScore').textContent = 'SAVE SCORE';
@@ -1753,6 +1904,7 @@ document.getElementById('restartBtn').addEventListener('click', () => {
 });
 
 document.getElementById('startBtn').addEventListener('click', () => {
+  _initAudio();
   document.getElementById('startScreen').classList.add('hidden');
   initGame();
   showMobileControls(true);
