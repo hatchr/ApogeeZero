@@ -3,6 +3,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<script src="https://unpkg.com/peerjs@1/dist/peerjs.min.js"></script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Apogee Zero</title>
 <style>
@@ -48,11 +49,11 @@ canvas { display: block; }
 #startScreen .sub { color: #88f; font-size: 18px; margin-bottom: 30px; }
 #startScreen .controls { color: #aaa; font-size: 14px; line-height: 2; margin-bottom: 30px; text-align: center; }
 #startScreen .controls span { color: #0ff; }
-#startBtn {
+#startBtn, #hostBtn, #joinBtn {
   background: transparent; border: 2px solid #0ff; color: #0ff; font-family: inherit;
   font-size: 24px; padding: 12px 40px; cursor: pointer;
 }
-#startBtn:hover { background: #0ff2; }
+#startBtn:hover, #hostBtn:hover, #joinBtn:hover { background: #0ff2; }
 @media (max-height: 500px) {
   #gameOver h1 { font-size: 28px; margin-bottom: 6px; }
   #gameOver .stats { font-size: 14px; margin: 3px 0; }
@@ -64,7 +65,7 @@ canvas { display: block; }
   #startScreen h1 { font-size: 30px; margin-bottom: 4px; }
   #startScreen .sub { font-size: 13px; margin-bottom: 8px; }
   #startScreen .controls { font-size: 12px; line-height: 1.6; margin-bottom: 10px; }
-  #startBtn { font-size: 16px; padding: 8px 28px; }
+  #startBtn, #hostBtn, #joinBtn { font-size: 16px; padding: 8px 28px; }
 }
 #joystickBase {
   display: none; position: fixed; width: 120px; height: 120px; border-radius: 50%;
@@ -85,6 +86,35 @@ canvas { display: block; }
   background: rgba(0,200,100,0.3); border: 2px solid #0c6;
   top: 50%; left: 50%; transform: translate(-50%, -50%);
 }
+#netStatus {
+  display: none; position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+  background: rgba(0,0,0,0.85); border: 1px solid #0ff; color: #0ff;
+  font-family: 'Courier New', monospace; font-size: 12px; padding: 4px 14px;
+  z-index: 20; letter-spacing: 2px;
+}
+#netStatus.active { display: block; }
+.net-panel {
+  display: none; flex-direction: column; align-items: center; width: 100%;
+  max-width: 460px; gap: 6px; margin-top: 8px;
+}
+.net-panel.active { display: flex; }
+.net-panel textarea {
+  width: 100%; height: 72px; background: #001018; border: 1px solid #0ff4;
+  color: #0ff; font-family: 'Courier New', monospace; font-size: 10px;
+  padding: 6px; resize: none; outline: none;
+}
+.net-label { color: #88a; font-size: 13px; align-self: flex-start; }
+.net-btns { display: flex; gap: 8px; }
+.net-msg { color: #ff0; font-size: 12px; min-height: 16px; }
+.net-btn {
+  background: transparent; border: 2px solid #0ff; color: #0ff;
+  font-family: 'Courier New', monospace; font-size: 13px;
+  padding: 5px 14px; cursor: pointer;
+}
+.net-btn:hover { background: #0ff2; }
+.net-btn.dim { border-color: #555; color: #555; }
+.net-btn.dim:hover { background: #5552; }
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
 </style>
 </head>
 <body>
@@ -98,7 +128,31 @@ canvas { display: block; }
     <span>Left Click</span> — Plasma Bolt<br>
     <span>Right Click</span> — Missile<br>
   </div>
-  <button id="startBtn">START GAME</button>
+  <div class="btn-row">
+    <button id="startBtn">PLAY SOLO</button>
+    <button id="hostBtn">HOST GAME</button>
+    <button id="joinBtn">JOIN GAME</button>
+  </div>
+  <div class="net-panel" id="hostPanel">
+    <div class="net-label">Share this code with your partner:</div>
+    <div id="hostCode" style="font-size:36px;letter-spacing:8px;color:#0ff;text-shadow:0 0 12px #0ff;margin:8px 0;">—</div>
+    <div class="net-btns">
+      <button class="net-btn" id="copyOfferBtn">COPY CODE</button>
+      <button class="net-btn dim" id="hostBackBtn">BACK</button>
+    </div>
+    <div class="net-msg" id="hostMsg"></div>
+  </div>
+  <div class="net-panel" id="joinPanel">
+    <div class="net-label">Enter your partner's code:</div>
+    <input id="joinCodeInput" type="text" maxlength="8"
+      style="font-size:28px;letter-spacing:6px;color:#0ff;background:transparent;border:2px solid #0ff4;
+             text-align:center;width:180px;padding:6px;outline:none;font-family:inherit;text-transform:uppercase">
+    <div class="net-btns">
+      <button class="net-btn" id="joinConnectBtn">JOIN</button>
+      <button class="net-btn dim" id="joinBackBtn">BACK</button>
+    </div>
+    <div class="net-msg" id="joinMsg"></div>
+  </div>
 </div>
 <div id="gameOver">
   <h1>GAME OVER</h1>
@@ -113,6 +167,7 @@ canvas { display: block; }
 </div>
 <div id="joystickBase"><div id="joystickStick"></div></div>
 <div id="rJoyBase"><div id="rJoyStick"></div></div>
+<div id="netStatus"></div>
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -287,6 +342,7 @@ function resetInputState() {
   let lb = document.getElementById('joystickBase'); if (lb) lb.style.display = 'none';
   let rb = document.getElementById('rJoyBase');     if (rb) rb.style.display = 'none';
   sndEngineUpdate(false);
+  // Net input state persists across respawns — don't clear guestInput here
 }
 
 window.addEventListener('blur', resetInputState);
@@ -309,6 +365,27 @@ let mRJoyId = null, mRJoyBX = 0, mRJoyDX = 0;
 let mobileAutoSeq = 0;
 const AUTOFIRE_ARC = 0.22; // ~12.5° — lead-shot must be within this arc to autofire
 const RJOY_RATE    = 0.1;  // rad/s per pixel of right-joystick deflection
+
+// ─── Multiplayer ──────────────────────────────────────────────────────────────
+let netRole = null;        // null (solo) | 'host' | 'guest'
+let netConnected = false, netLost = false;
+let hostStateSentFirst = false;
+let netSendTimer = 0;
+const NET_HZ = 20;
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+];
+
+// Player 2 state (host-canonical, guest receives via state packets)
+let player2 = null;
+let p2PlasmaEnergy = 100, p2MissileEnergy = 100;
+let p2PlasmaCD = 0, p2MissileCD = 0;
+let p2ShieldTimer = 0, p2SpreadTimer = 0, p2HomingTimer = 0;
+let lives2 = 3, invincTimer2 = 0;
+
+// Host stores latest input received from guest
+let guestInput = { w: false, s: false, a: false, d: false, md: false, rd: false, mx: 0 };
 
 const STORAGE_KEYS = {
   leaderboard: 'sd_leaderboard',
@@ -340,9 +417,31 @@ function initGame() {
   plasmaEnergy = plasmaMax; missileEnergy = missileMax;
   camX = 0; camY = 0;
   shakeX = 0; shakeY = 0; shakeDur = 0;
+  // Player 2 init (multiplayer host)
+  if (netRole === 'host') {
+    player2 = { x: 120, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, hp: 100, maxHp: 100, radius: 16 };
+    lives2 = 3; invincTimer2 = 0;
+    p2PlasmaEnergy = plasmaMax; p2MissileEnergy = missileMax;
+    p2PlasmaCD = 0; p2MissileCD = 0;
+    p2ShieldTimer = 0; p2SpreadTimer = 0; p2HomingTimer = 0;
+    guestInput = { w: false, s: false, a: false, d: false, md: false, rd: false, mx: 0 };
+    netSendTimer = 0; hostStateSentFirst = false;
+  } else {
+    player2 = null;
+  }
   makeStars();
   makePlanets();
   nextWave();
+}
+
+function pickNearestPlayer(obj) {
+  let p1ok = !player.ghost, p2ok = player2 && !player2.ghost;
+  if (!p1ok && !p2ok) return player; // both ghost, return something harmless
+  if (!p2ok) return player;
+  if (!p1ok) return player2;
+  let d1 = Math.hypot(player.x - obj.x, player.y - obj.y);
+  let d2 = Math.hypot(player2.x - obj.x, player2.y - obj.y);
+  return d1 <= d2 ? player : player2;
 }
 
 function makePlanets() {
@@ -525,8 +624,12 @@ function spawnParticles(x, y, color, count, speed) {
   }
 }
 
+function checkGameOver() {
+  if (player2 ? (player.ghost && player2.ghost) : player.ghost) gameOver();
+}
+
 function damagePlayer(amount) {
-  if (invincTimer > 0 || shieldTimer > 0) return;
+  if (player.ghost || invincTimer > 0 || shieldTimer > 0) return;
   player.hp -= amount;
   screenShake(0.1);
   if (player.hp <= 0) {
@@ -535,8 +638,37 @@ function damagePlayer(amount) {
     spawnParticles(player.x, player.y, '#fff', 15, 200);
     screenShake(0.3);
     sndExplosion(true);
-    if (lives <= 0) { gameOver(); }
-    else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; resetInputState(); }
+    if (lives <= 0) {
+      player.ghost = true;
+      player.hp = player.maxHp;
+      invincTimer = 0;
+      checkGameOver();
+    } else {
+      player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; resetInputState();
+    }
+  } else {
+    sndHit(0.30);
+  }
+}
+
+function damagePlayer2(amount) {
+  if (!player2 || player2.ghost || invincTimer2 > 0 || p2ShieldTimer > 0) return;
+  player2.hp -= amount;
+  screenShake(0.1);
+  if (player2.hp <= 0) {
+    lives2--;
+    spawnParticles(player2.x, player2.y, '#f0f', 30, 250);
+    spawnParticles(player2.x, player2.y, '#fff', 15, 200);
+    screenShake(0.3);
+    sndExplosion(true);
+    if (lives2 <= 0) {
+      player2.ghost = true;
+      player2.hp = player2.maxHp;
+      invincTimer2 = 0;
+      checkGameOver();
+    } else {
+      player2.hp = player2.maxHp; player2.vx = 0; player2.vy = 0; invincTimer2 = 2.5;
+    }
   } else {
     sndHit(0.30);
   }
@@ -621,8 +753,8 @@ function fireProjectile(owner, x, y, angle, type, srcVx, srcVy, opts) {
   let p = { x, y, angle, owner, type, ...def,
             vx: Math.cos(angle) * def.speed + sx,
             vy: Math.sin(angle) * def.speed + sy };
-  if (type === 'plasma' && owner !== 'player') p.color = owner === 'ally' ? '#4f8' : '#f88';
-  if (type === 'missile' && owner !== 'player') p.color = '#f0f';
+  if (type === 'plasma' && owner !== 'player') p.color = owner === 'ally' ? '#4f8' : owner === 'player2' ? '#f4f' : '#f88';
+  if (type === 'missile' && owner !== 'player') p.color = owner === 'player2' ? '#fa0' : '#f0f';
   if (opts && opts.homing) { p.homing = true; p.color = '#f60'; p.turnRate = 3.5; }
   projectiles.push(p);
 }
@@ -763,6 +895,7 @@ function applyMovement(obj, avoiding, drag, dt) {
 
 function updatePhysics(dt) {
   applyGravity(player, dt);
+  if (player2) applyGravity(player2, dt);
   for (let e of enemies) applyGravity(e, dt);
   for (let a of allies) applyGravity(a, dt);
   for (let p of projectiles) {
@@ -774,14 +907,30 @@ function updatePhysics(dt) {
     // Player — save hp to detect damage, restore if invincible
     let hpBefore = player.hp;
     let playerDied = handlePlanetCollision(player, pl);
-    if (invincTimer > 0 || shieldTimer > 0) {
-      player.hp = hpBefore; // undo damage if protected
+    if (invincTimer > 0 || shieldTimer > 0 || player.ghost) {
+      player.hp = hpBefore; // undo damage if protected or ghost
     } else if (playerDied) {
       lives--;
       spawnParticles(player.x, player.y, '#0ff', 30, 250);
       spawnParticles(player.x, player.y, '#fff', 15, 200);
       screenShake(0.3);
-      if (lives <= 0) { gameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; resetInputState(); }
+      if (lives <= 0) { player.ghost = true; player.hp = player.maxHp; invincTimer = 0; checkGameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; resetInputState(); }
+    }
+
+    // Player 2 planet collision
+    if (player2) {
+      let hpBefore2 = player2.hp;
+      let p2Died = handlePlanetCollision(player2, pl);
+      if (invincTimer2 > 0 || p2ShieldTimer > 0 || player2.ghost) {
+        player2.hp = hpBefore2;
+      } else if (p2Died) {
+        lives2--;
+        spawnParticles(player2.x, player2.y, '#f0f', 30, 250);
+        spawnParticles(player2.x, player2.y, '#fff', 15, 200);
+        screenShake(0.3); sndExplosion(true);
+        if (lives2 <= 0) { player2.ghost = true; player2.hp = player2.maxHp; invincTimer2 = 0; checkGameOver(); }
+        else { player2.hp = player2.maxHp; player2.vx = 0; player2.vy = 0; invincTimer2 = 2.5; }
+      }
     }
 
     // Enemies
@@ -844,7 +993,7 @@ function updatePlayer(dt) {
       let spread = (Math.random()-0.5)*0.6;
       let a = player.angle + Math.PI + spread;
       let s = 80 + Math.random()*60;
-      addParticle({ x: ex, y: ey, vx: Math.cos(a)*s + player.vx*0.3, vy: Math.sin(a)*s + player.vy*0.3, life: 0.3+Math.random()*0.2, maxLife: 0.5, color: '#0af', size: 2+Math.random()*2 });
+      addParticle({ x: ex, y: ey, vx: Math.cos(a)*s + player.vx*0.3, vy: Math.sin(a)*s + player.vy*0.3, life: 0.3+Math.random()*0.2, maxLife: 0.5, color: player.ghost ? '#666' : '#0af', size: 2+Math.random()*2 });
     }
   }
 
@@ -860,7 +1009,7 @@ function updatePlayer(dt) {
   // Player shooting
   plasmaCD -= dt; missileCD -= dt;
   let pCost = spreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
-  if (mouseDown && plasmaCD <= 0 && plasmaEnergy >= pCost) {
+  if (!player.ghost && mouseDown && plasmaCD <= 0 && plasmaEnergy >= pCost) {
     let fx = player.x + Math.cos(player.angle)*20;
     let fy = player.y + Math.sin(player.angle)*20;
     if (spreadTimer > 0) {
@@ -874,7 +1023,7 @@ function updatePlayer(dt) {
     plasmaCD = 0.15;
     sndPlasma(true);
   }
-  if (rightDown && missileCD <= 0 && missileEnergy >= missileCost) {
+  if (!player.ghost && rightDown && missileCD <= 0 && missileEnergy >= missileCost) {
     let fx = player.x + Math.cos(player.angle)*20;
     let fy = player.y + Math.sin(player.angle)*20;
     fireProjectile('player', fx, fy, player.angle, 'missile', player.vx, player.vy, { homing: homingTimer > 0 });
@@ -937,26 +1086,95 @@ function updatePlayer(dt) {
   }
 }
 
+function updatePlayer2(dt) {
+  if (!player2 || netRole !== 'host') return;
+  let gi = guestInput;
+
+  player2.angle += gi.mx * 0.004;
+  gi.mx = 0;
+
+  let f = (gi.w ? 1 : 0) - (gi.s ? 1 : 0);
+  let s = (gi.d ? 1 : 0) - (gi.a ? 1 : 0);
+  thrustLocal(player2, f, s, 300 * dt);
+  let damp = Math.pow(0.99, dt * 60);
+  player2.vx *= damp; player2.vy *= damp;
+  player2.x += player2.vx * dt; player2.y += player2.vy * dt;
+
+  // Exhaust
+  if (gi.w) {
+    let ex = player2.x - Math.cos(player2.angle)*18;
+    let ey = player2.y - Math.sin(player2.angle)*18;
+    for (let i = 0; i < 2; i++) {
+      let spread = (Math.random()-0.5)*0.6;
+      let a = player2.angle + Math.PI + spread;
+      let spd = 80 + Math.random()*60;
+      addParticle({ x: ex, y: ey, vx: Math.cos(a)*spd + player2.vx*0.3, vy: Math.sin(a)*spd + player2.vy*0.3,
+                    life: 0.3+Math.random()*0.2, maxLife: 0.5, color: player2.ghost ? '#666' : '#f4f', size: 2+Math.random()*2 });
+    }
+  }
+
+  // Ammo recharge
+  let plasmaRate2 = p2SpreadTimer > 0 ? plasmaRecharge * 6 : plasmaRecharge;
+  let missileRate2 = p2HomingTimer > 0 ? missileRecharge * 2 : missileRecharge;
+  p2PlasmaEnergy = Math.min(plasmaMax, p2PlasmaEnergy + plasmaRate2 * dt);
+  p2MissileEnergy = Math.min(missileMax, p2MissileEnergy + missileRate2 * dt);
+
+  player2.hp = Math.min(player2.maxHp, player2.hp + 2 * dt);
+
+  p2PlasmaCD -= dt; p2MissileCD -= dt;
+  let pCost2 = p2SpreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
+  if (!player2.ghost && gi.md && p2PlasmaCD <= 0 && p2PlasmaEnergy >= pCost2) {
+    let fx = player2.x + Math.cos(player2.angle)*20;
+    let fy = player2.y + Math.sin(player2.angle)*20;
+    if (p2SpreadTimer > 0) {
+      fireProjectile('player2', fx, fy, player2.angle - 0.2, 'plasma', player2.vx, player2.vy);
+      fireProjectile('player2', fx, fy, player2.angle,       'plasma', player2.vx, player2.vy);
+      fireProjectile('player2', fx, fy, player2.angle + 0.2, 'plasma', player2.vx, player2.vy);
+    } else {
+      fireProjectile('player2', fx, fy, player2.angle, 'plasma', player2.vx, player2.vy);
+    }
+    p2PlasmaEnergy -= pCost2; p2PlasmaCD = 0.15;
+    sndPlasma(true);
+  }
+  if (!player2.ghost && gi.rd && p2MissileCD <= 0 && p2MissileEnergy >= missileCost) {
+    let fx = player2.x + Math.cos(player2.angle)*20;
+    let fy = player2.y + Math.sin(player2.angle)*20;
+    fireProjectile('player2', fx, fy, player2.angle, 'missile', player2.vx, player2.vy, { homing: p2HomingTimer > 0 });
+    p2MissileEnergy -= missileCost; p2MissileCD = 0.5;
+    sndMissileFire();
+  }
+}
+
 // ---------- NPC behaviors ----------
 // Each behavior is "what does this ship want to do this frame?" — it sets
 // velocity/angle intent via the shared thrust helpers, and sets ship._avoiding
 // so the outer loop knows whether to bypass the speed cap in applyMovement.
 // The outer loop handles EMP, movement integration, and exhaust uniformly.
 
-// Enemy target pick: player by default; coin-flip switch to a closer ally.
+// Enemy target pick: nearest player by default; coin-flip switch to a closer ally.
 function pickEnemyShootTarget(e, distToPlayer) {
   let target = player;
+  let refDistSq = distToPlayer * distToPlayer;
+  // In multiplayer, consider player2 as a target
+  if (player2 && !player2.ghost && lives2 > 0 && invincTimer2 <= 0) {
+    let dx2 = player2.x - e.x, dy2 = player2.y - e.y;
+    let d2sq = dx2*dx2 + dy2*dy2;
+    if (d2sq < refDistSq * 0.8 || (d2sq < refDistSq * 1.3 && Math.random() < 0.4)) {
+      target = player2; refDistSq = d2sq;
+    }
+  }
   for (let a of allies) {
     let adx = a.x - e.x, ady = a.y - e.y;
-    if (adx*adx + ady*ady < distToPlayer*distToPlayer && Math.random() < 0.5) target = a;
+    if (adx*adx + ady*ady < refDistSq && Math.random() < 0.5) target = a;
   }
   return target;
 }
 
-// Kamikaze: ram the player. No shooting.
+// Kamikaze: ram the nearest player. No shooting.
 function kamikazeAI(e, dt) {
-  let dx = player.x - e.x, dy = player.y - e.y;
-  e._avoiding = avoidPlanets(e, dt, player);
+  let tgt = pickNearestPlayer(e);
+  let dx = tgt.x - e.x, dy = tgt.y - e.y;
+  e._avoiding = avoidPlanets(e, dt, tgt);
   if (e._avoiding) return;
   e.angle = turnToward(e.angle, Math.atan2(dy, dx), e.turnSpeed, dt);
   let accel = e.speed * dt * 2.5;
@@ -966,10 +1184,11 @@ function kamikazeAI(e, dt) {
 
 // Drone: strafing run — charge in, break past, extend out, loop back.
 function droneAI(e, dt) {
-  let dx = player.x - e.x, dy = player.y - e.y;
+  let tgt = pickNearestPlayer(e);
+  let dx = tgt.x - e.x, dy = tgt.y - e.y;
   let dist = Math.sqrt(dx*dx + dy*dy);
   let desiredAngle = Math.atan2(dy, dx);
-  e._avoiding = avoidPlanets(e, dt, player);
+  e._avoiding = avoidPlanets(e, dt, tgt);
   if (!e._avoiding) {
     let accel = e.speed * dt * 2.0;
     if (e.attackState === 'charge') {
@@ -1000,10 +1219,11 @@ function droneAI(e, dt) {
 // Gunship / bruiser: hold preferred distance, orbit, shoot. Same behavior —
 // per-type parameters (preferDist, orbitStrength, weapon) do the differentiating.
 function orbiterAI(e, dt) {
-  let dx = player.x - e.x, dy = player.y - e.y;
+  let tgt = pickNearestPlayer(e);
+  let dx = tgt.x - e.x, dy = tgt.y - e.y;
   let dist = Math.sqrt(dx*dx + dy*dy);
-  e._avoiding = avoidPlanets(e, dt, player);
-  if (!e._avoiding) steerOrbit(e, player.x, player.y, dist, dt);
+  e._avoiding = avoidPlanets(e, dt, tgt);
+  if (!e._avoiding) steerOrbit(e, tgt.x, tgt.y, dist, dt);
   // aimAndShoot handles all turning via lead-shot; no separate player-facing
   // turn here — two competing turnToward calls fight when orbital velocity is
   // high, causing the nose to stall between the two target angles.
@@ -1024,7 +1244,8 @@ function allyAI(a, dt) {
     steerOrbit(a, target.x, target.y, tDist, dt);
     aimAndShoot(a, target, dt);
   } else {
-    let dx = player.x - a.x, dy = player.y - a.y;
+    let np = pickNearestPlayer(a);
+    let dx = np.x - a.x, dy = np.y - a.y;
     a.angle = turnToward(a.angle, Math.atan2(dy, dx), a.turnSpeed, dt);
     let d = Math.sqrt(dx*dx + dy*dy);
     if (d > 150) {
@@ -1083,8 +1304,8 @@ function updateProjectiles(dt) {
 
     let hit = false;
 
-    // Player & ally projectiles hit enemies
-    if (p.owner === 'player' || p.owner === 'ally') {
+    // Player, player2 & ally projectiles hit enemies
+    if (p.owner === 'player' || p.owner === 'player2' || p.owner === 'ally') {
       for (let j = enemies.length - 1; j >= 0; j--) {
         let e = enemies[j];
         let ddx = p.x - e.x, ddy = p.y - e.y;
@@ -1094,7 +1315,7 @@ function updateProjectiles(dt) {
           projectiles.splice(i, 1); hit = true;
           sndHit(0.15);
           if (e.hp <= 0) {
-            if (p.owner === 'player') score += e.score;
+            if (p.owner === 'player' || p.owner === 'player2') score += e.score;
             spawnParticles(e.x, e.y, e.color, 20, 200);
             spawnParticles(e.x, e.y, '#ff0', 10, 150);
             screenShake(0.15);
@@ -1134,7 +1355,7 @@ function updateProjectiles(dt) {
     if (hit) continue;
 
     // Enemy & ally projectiles hit player (friendly fire from allies too)
-    if ((p.owner === 'enemy' || p.owner === 'ally') && invincTimer <= 0) {
+    if ((p.owner === 'enemy' || p.owner === 'ally') && !player.ghost && invincTimer <= 0) {
       let ddx = p.x - player.x, ddy = p.y - player.y;
       if (ddx*ddx + ddy*ddy < (p.radius + player.radius) * (p.radius + player.radius)) {
         if (shieldTimer > 0) {
@@ -1145,6 +1366,22 @@ function updateProjectiles(dt) {
         spawnParticles(p.x, p.y, '#0ff', 8, 120);
         projectiles.splice(i, 1); hit = true;
         damagePlayer(p.dmg);
+      }
+    }
+    if (hit) continue;
+
+    // Enemy projectiles hit player2
+    if (p.owner === 'enemy' && player2 && !player2.ghost && invincTimer2 <= 0) {
+      let ddx = p.x - player2.x, ddy = p.y - player2.y;
+      if (ddx*ddx + ddy*ddy < (p.radius + player2.radius) * (p.radius + player2.radius)) {
+        if (p2ShieldTimer > 0) {
+          spawnParticles(p.x, p.y, '#f4f', 6, 100);
+          projectiles.splice(i, 1);
+          continue;
+        }
+        spawnParticles(p.x, p.y, '#f0f', 8, 120);
+        projectiles.splice(i, 1); hit = true;
+        damagePlayer2(p.dmg);
       }
     }
     if (hit) continue;
@@ -1174,6 +1411,7 @@ function updateCollisions(dt) {
   // Enemy-player collision
   for (let j = enemies.length - 1; j >= 0; j--) {
     let e = enemies[j];
+    if (player.ghost) continue;
     let ddx = e.x - player.x, ddy = e.y - player.y;
     if (ddx*ddx + ddy*ddy < (e.radius + player.radius) * (e.radius + player.radius)) {
       if (e.type === 'kamikaze') {
@@ -1187,7 +1425,7 @@ function updateCollisions(dt) {
         enemiesAlive--;
         continue;
       }
-      if (invincTimer <= 0 && shieldTimer <= 0) {
+      if (!player.ghost && invincTimer <= 0 && shieldTimer <= 0) {
         spawnParticles(player.x, player.y, '#0ff', 8, 100);
         screenShake(0.15);
         damagePlayer(15);
@@ -1199,9 +1437,46 @@ function updateCollisions(dt) {
     }
   }
 
-  // Ally-player collision
+  // Enemy-player2 collision
+  if (player2) {
+    for (let j = enemies.length - 1; j >= 0; j--) {
+      let e = enemies[j];
+      if (player2.ghost) continue;
+      let ddx = e.x - player2.x, ddy = e.y - player2.y;
+      if (ddx*ddx + ddy*ddy < (e.radius + player2.radius) * (e.radius + player2.radius)) {
+        if (e.type === 'kamikaze') {
+          spawnParticles(e.x, e.y, '#cf0', 25, 250);
+          spawnParticles(e.x, e.y, '#ff0', 15, 180);
+          screenShake(0.3); damagePlayer2(e.dmg); score += e.score;
+          enemies.splice(j, 1); enemiesAlive--; continue;
+        }
+        if (!player2.ghost && invincTimer2 <= 0 && p2ShieldTimer <= 0) {
+          spawnParticles(player2.x, player2.y, '#f0f', 8, 100);
+          screenShake(0.15); damagePlayer2(15);
+        }
+        let pushA = Math.atan2(ddy, ddx);
+        e.vx += Math.cos(pushA) * 200; e.vy += Math.sin(pushA) * 200;
+      }
+    }
+  }
+
+  // Player1-player2 gentle bounce (co-op, no damage) — skip if either is a ghost
+  if (player2 && !player.ghost && !player2.ghost) {
+    let ddx = player2.x - player.x, ddy = player2.y - player.y;
+    let { nx, ny, dist } = normalized(ddx, ddy, player2.angle || 0);
+    if (dist < player2.radius + player.radius) {
+      player2.x = player.x + nx * (player2.radius + player.radius);
+      player2.y = player.y + ny * (player2.radius + player.radius);
+      let imp = Math.abs((player.vx - player2.vx) * nx + (player.vy - player2.vy) * ny);
+      player2.vx += nx * imp * 0.4; player2.vy += ny * imp * 0.4;
+      player.vx  -= nx * imp * 0.4; player.vy  -= ny * imp * 0.4;
+    }
+  }
+
+  // Ally-player collision (skip if player is a ghost)
   for (let i = allies.length - 1; i >= 0; i--) {
     let a = allies[i];
+    if (player.ghost) break;
     let ddx = a.x - player.x, ddy = a.y - player.y;
     let { nx, ny, dist } = normalized(ddx, ddy, a.angle || 0);
     if (dist < a.radius + player.radius) {
@@ -1276,6 +1551,9 @@ function updatePowerups(dt) {
   if (spreadTimer > 0) spreadTimer -= dt;
   if (empTimer > 0) empTimer -= dt;
   if (homingTimer > 0) homingTimer -= dt;
+  if (p2ShieldTimer > 0) p2ShieldTimer -= dt;
+  if (p2SpreadTimer > 0) p2SpreadTimer -= dt;
+  if (p2HomingTimer > 0) p2HomingTimer -= dt;
 
   // Powerups — pickup and expire
   for (let i = powerups.length - 1; i >= 0; i--) {
@@ -1285,6 +1563,27 @@ function updatePowerups(dt) {
     let dx = player.x - pu.x, dy = player.y - pu.y;
     let distSq = dx*dx + dy*dy;
     let { nx, ny } = normalized(dx, dy, player.angle || 0);
+    // Also check player2 pickup
+    if (player2) {
+      let dx2 = player2.x - pu.x, dy2 = player2.y - pu.y;
+      if (dx2*dx2 + dy2*dy2 < (player2.radius + pu.radius) * (player2.radius + pu.radius)) {
+        if (pu.type === 'health') { player2.hp = Math.min(player2.maxHp, player2.hp + 40); }
+        else if (pu.type === 'shield') { p2ShieldTimer = 8; }
+        else if (pu.type === 'spread') { p2SpreadTimer = 10; }
+        else if (pu.type === 'homing') { p2HomingTimer = 12; }
+        else if (pu.type === 'emp') {
+          empTimer = 6;
+          for (let e of enemies) e.spinRate = (Math.random() - 0.5) * 8;
+          for (let a of allies) a.spinRate = (Math.random() - 0.5) * 8;
+          spawnParticles(player2.x, player2.y, '#ff0', 30, 200);
+          spawnParticles(player2.x, player2.y, '#fff', 15, 150);
+          screenShake(0.4); sndEMP(); empWave = 0; empWaveMax = 2000;
+        }
+        spawnParticles(pu.x, pu.y, POWERUP_DEFS[pu.type].color, 10, 80);
+        sndPickup(pu.type); powerups.splice(i, 1); continue;
+      }
+    }
+
     // Powerups gravitate toward player
     let force = 5000000 / (distSq + 500);
     pu.vx += nx * force * dt;
@@ -1340,9 +1639,26 @@ function updateParticles(dt) {
 
 function update(dt) {
   if (!gameRunning) return;
+
+  // Guest: send inputs and render received state — no local simulation
+  if (netRole === 'guest') {
+    _sendGuestInput();
+    mouseDX = 0;
+    sndEngineUpdate(!!(keys['w'] || keys['s'] || keys['a'] || keys['d']));
+    _guestSpawnExhaust();
+    updateParticles(dt);
+    if (empWave < empWaveMax) { empWave += 1000 * dt; if (empWave > empWaveMax) empWave = empWaveMax; }
+    if (player2) { camX = player2.x; camY = player2.y; }
+    if (shakeDur > 0) { shakeX = (Math.random()-0.5)*8; shakeY = (Math.random()-0.5)*8; shakeDur -= dt; }
+    else { shakeX = 0; shakeY = 0; }
+    return;
+  }
+
   if (invincTimer > 0) invincTimer -= dt;
+  if (player2 && invincTimer2 > 0) invincTimer2 -= dt;
   updatePhysics(dt);
   updatePlayer(dt);
+  if (player2) updatePlayer2(dt);
 
   // Wave spawning
   if (waveEnemiesLeft > 0) {
@@ -1369,7 +1685,13 @@ function update(dt) {
     if (empWave > empWaveMax) empWave = empWaveMax;
   }
 
-  // Camera
+  // Broadcast state to guest at NET_HZ
+  if (netRole === 'host' && netConnected) {
+    netSendTimer -= dt;
+    if (netSendTimer <= 0) { netSendTimer = 1 / NET_HZ; _sendHostState(); }
+  }
+
+  // Camera follows own ship
   camX = player.x; camY = player.y;
   if (shakeDur > 0) {
     shakeX = (Math.random()-0.5) * 8; shakeY = (Math.random()-0.5) * 8;
@@ -1611,8 +1933,30 @@ function draw() {
     drawShip(a.x, a.y, a.angle, '#0c6', '#4f8', a.radius, a.hp, a.maxHp, true, true);
   }
 
-  // Player
-  if (invincTimer > 0 && Math.floor(invincTimer * 10) % 2 === 0) {
+  // Player 2 (magenta, or gray ghost)
+  if (player2) {
+    if (player2.ghost) {
+      ctx.globalAlpha = 0.35;
+      drawShip(player2.x, player2.y, player2.angle, '#666', '#999', player2.radius, player2.hp, player2.maxHp, true, false);
+      ctx.globalAlpha = 1;
+    } else if (!(invincTimer2 > 0 && Math.floor(invincTimer2 * 10) % 2 === 0)) {
+      drawShip(player2.x, player2.y, player2.angle, '#f0f', '#f8f', player2.radius, player2.hp, player2.maxHp, true, false);
+    }
+    if (p2ShieldTimer > 0) {
+      let a2 = p2ShieldTimer < 2 ? p2ShieldTimer / 2 : 0.6;
+      ctx.globalAlpha = a2;
+      ctx.strokeStyle = '#f0f'; glow(20, '#f0f'); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(player2.x, player2.y, player2.radius + 8, 0, Math.PI*2); ctx.stroke();
+      ctx.globalAlpha = 1; glow(0);
+    }
+  }
+
+  // Player 1 (cyan, or gray ghost)
+  if (player.ghost) {
+    ctx.globalAlpha = 0.35;
+    drawShip(player.x, player.y, player.angle, '#666', '#999', player.radius, player.hp, player.maxHp, true, false);
+    ctx.globalAlpha = 1;
+  } else if (invincTimer > 0 && Math.floor(invincTimer * 10) % 2 === 0) {
     // Blink
   } else {
     drawShip(player.x, player.y, player.angle, '#0cf', '#4ef', player.radius, player.hp, player.maxHp, true, false);
@@ -1677,25 +2021,42 @@ function drawBar(x, y, w, h, pct, color, label, labelColor) {
 
 function drawHUD() {
   let barW = 200, barX = 20, barY = 20;
+  let isGuest = netRole === 'guest';
+  let localPlayer = (isGuest && player2) ? player2 : player;
 
-  // Health bar
-  let hpPct = player.hp / player.maxHp;
-  let hpColor = hpPct > 0.5 ? '#0f0' : hpPct > 0.25 ? '#ff0' : '#f00';
-  drawBar(barX, barY, barW, 16, hpPct, hpColor, 'HP', '#fff');
+  // My HP bar
+  let myHp = localPlayer.hp, myMaxHp = localPlayer.maxHp;
+  let hpPct = localPlayer.ghost ? 0 : myHp / myMaxHp;
+  let hpColor = localPlayer.ghost ? '#555' : hpPct > 0.5 ? '#0f0' : hpPct > 0.25 ? '#ff0' : '#f00';
+  let hpLabel = player2 ? (isGuest ? 'P2 HP' : 'P1 HP') : 'HP';
+  drawBar(barX, barY, barW, 16, hpPct, hpColor, hpLabel, '#fff');
 
-  // Plasma energy bar
+  // Other player's HP bar (multiplayer only)
   let ammoBarY = barY + 20;
-  drawBar(barX, ammoBarY, barW, 8, plasmaEnergy / plasmaMax, '#0ff', 'PLASMA');
+  if (player2) {
+    let otherPlayer = isGuest ? player : player2;
+    let oPct = otherPlayer.ghost ? 0 : otherPlayer.hp / otherPlayer.maxHp;
+    let oColor = otherPlayer.ghost ? '#555' : oPct > 0.5 ? '#0f0' : oPct > 0.25 ? '#ff0' : '#f00';
+    let oAccent = isGuest ? '#4ef' : '#f8f';
+    let oLabel = isGuest ? 'P1' : 'P2';
+    drawBar(barX, ammoBarY, barW, 10, oPct, oColor, oLabel, oAccent);
+    ammoBarY += 14;
+  }
 
-  // Missile energy bar
+  // Ammo bars — always show local player's ammo
+  let myPlasma = isGuest ? p2PlasmaEnergy : plasmaEnergy;
+  let myMissile = isGuest ? p2MissileEnergy : missileEnergy;
+  let ammoColor = isGuest ? '#f0f' : '#0ff';
+  drawBar(barX, ammoBarY, barW, 8, myPlasma / plasmaMax, ammoColor, 'PLASMA');
   let missBarY = ammoBarY + 11;
-  drawBar(barX, missBarY, barW, 8, missileEnergy / missileMax, '#0f0', 'MISSILE');
+  drawBar(barX, missBarY, barW, 8, myMissile / missileMax, ammoColor, 'MISSILE');
 
   // Lives
+  let livesLabel = player2 ? ('P1:' + lives + '  P2:' + lives2) : 'LIVES: ' + lives;
   ctx.fillStyle = '#0ff';
   glow(6, '#0ff');
-  ctx.font = '16px Courier New';
-  ctx.fillText('LIVES: ' + lives, barX, missBarY + 8 + 18);
+  ctx.font = '14px Courier New';
+  ctx.fillText(livesLabel, barX, missBarY + 8 + 18);
   glow(0);
 
   // Score + Wave — top centre
@@ -1712,12 +2073,15 @@ function drawHUD() {
   glow(0);
   ctx.textAlign = 'left';
 
-  // Active powerup indicators
+  // Active powerup indicators — show local player's timers
+  let myShield = isGuest ? p2ShieldTimer : shieldTimer;
+  let mySpread = isGuest ? p2SpreadTimer : spreadTimer;
+  let myHoming = isGuest ? p2HomingTimer : homingTimer;
   let puY = missBarY + 8 + 36;
   ctx.font = '14px Courier New';
   for (let [timer, key] of [
-    [shieldTimer, 'shield'], [spreadTimer, 'spread'],
-    [empTimer,    'emp'],    [homingTimer, 'homing'],
+    [myShield, 'shield'], [mySpread, 'spread'],
+    [empTimer, 'emp'],    [myHoming, 'homing'],
   ]) {
     if (timer <= 0) continue;
     let { color } = POWERUP_DEFS[key];
@@ -1760,10 +2124,10 @@ function drawHUD() {
   ctx.lineTo(radarX, radarY + radarR);
   ctx.stroke();
 
-  // Helper to plot a blip
+  // Helper to plot a blip (centered on local player)
   function blip(wx, wy, color, size) {
-    let dx = (wx - player.x) / radarRange * radarR;
-    let dy = (wy - player.y) / radarRange * radarR;
+    let dx = (wx - localPlayer.x) / radarRange * radarR;
+    let dy = (wy - localPlayer.y) / radarRange * radarR;
     let dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > radarR - 2) {
       // Clamp to edge
@@ -1776,8 +2140,8 @@ function drawHUD() {
 
   // Planets
   for (let pl of planets) {
-    let dx = (pl.x - player.x) / radarRange * radarR;
-    let dy = (pl.y - player.y) / radarRange * radarR;
+    let dx = (pl.x - localPlayer.x) / radarRange * radarR;
+    let dy = (pl.y - localPlayer.y) / radarRange * radarR;
     let pr = Math.max(2, pl.radius / radarRange * radarR);
     ctx.fillStyle = 'rgba(255,255,255,0.1)';
     ctx.beginPath();
@@ -1795,16 +2159,21 @@ function drawHUD() {
     blip(pu.x, pu.y, col, 2);
   }
 
-  // Player (center dot)
-  ctx.fillStyle = '#0ff';
-  ctx.fillRect(radarX - 1.5, radarY - 1.5, 3, 3);
+  // Other player blip
+  if (player2) {
+    if (isGuest) blip(player.x,   player.y,   '#0cf', 4);
+    else         blip(player2.x, player2.y, '#f0f', 4);
+  }
 
-  // Player facing line
-  ctx.strokeStyle = '#0ff';
+  // Local player center dot + facing line
+  let dotColor = isGuest ? '#f0f' : '#0ff';
+  ctx.fillStyle = dotColor;
+  ctx.fillRect(radarX - 1.5, radarY - 1.5, 3, 3);
+  ctx.strokeStyle = dotColor;
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(radarX, radarY);
-  ctx.lineTo(radarX + Math.cos(player.angle) * 10, radarY + Math.sin(player.angle) * 10);
+  ctx.lineTo(radarX + Math.cos(localPlayer.angle) * 10, radarY + Math.sin(localPlayer.angle) * 10);
   ctx.stroke();
 
   ctx.restore();
@@ -1822,6 +2191,7 @@ function gameOver() {
   gameOverActive = true;
   resetInputState();
   sndEngineUpdate(false);
+  if (netRole === 'host' && netConnected) _netSend({ t: 'gameover' });
   showMobileControls(false);
   setTimeout(() => document.exitPointerLock?.(), 0);
   document.getElementById('finalScore').textContent = 'Score: ' + score;
@@ -1893,6 +2263,7 @@ document.getElementById('submitScore').addEventListener('click', () => {
 });
 
 document.getElementById('restartBtn').addEventListener('click', () => {
+  if (netRole) { window.location.reload(); return; }
   _initAudio();
   document.getElementById('gameOver').classList.remove('active');
   document.getElementById('submitScore').disabled = false;
@@ -1910,6 +2281,68 @@ document.getElementById('startBtn').addEventListener('click', () => {
   initGame();
   showMobileControls(true);
   gameRunning = true;
+});
+
+function showStartButtons() {
+  document.querySelector('.btn-row').style.display = '';
+  document.getElementById('hostPanel').classList.remove('active');
+  document.getElementById('joinPanel').classList.remove('active');
+}
+
+document.getElementById('hostBtn').addEventListener('click', () => {
+  document.querySelector('.btn-row').style.display = 'none';
+  document.getElementById('hostPanel').classList.add('active');
+  document.getElementById('hostCode').textContent = '—';
+  document.getElementById('hostMsg').textContent = 'Connecting to server…';
+  netRole = 'host';
+  startHost().then(id => {
+    document.getElementById('hostCode').textContent = id;
+    document.getElementById('hostMsg').textContent = 'Give that code to your partner, then wait.';
+  }).catch(() => {
+    document.getElementById('hostMsg').textContent = 'Could not reach signalling server. Check your connection.';
+  });
+});
+
+document.getElementById('hostBackBtn').addEventListener('click', () => {
+  _destroyPeer(); netRole = null;
+  showStartButtons();
+});
+
+document.getElementById('copyOfferBtn').addEventListener('click', () => {
+  let code = document.getElementById('hostCode').textContent;
+  if (!code || code === '—') return;
+  navigator.clipboard?.writeText(code).catch(() => {});
+  document.getElementById('copyOfferBtn').textContent = 'COPIED!';
+  setTimeout(() => document.getElementById('copyOfferBtn').textContent = 'COPY CODE', 1500);
+});
+
+document.getElementById('joinBtn').addEventListener('click', () => {
+  document.querySelector('.btn-row').style.display = 'none';
+  document.getElementById('joinPanel').classList.add('active');
+  document.getElementById('joinCodeInput').value = '';
+  document.getElementById('joinMsg').textContent = '';
+  netRole = 'guest';
+  setTimeout(() => document.getElementById('joinCodeInput').focus(), 50);
+});
+
+document.getElementById('joinBackBtn').addEventListener('click', () => {
+  _destroyPeer(); netRole = null;
+  showStartButtons();
+});
+
+document.getElementById('joinConnectBtn').addEventListener('click', () => {
+  let code = document.getElementById('joinCodeInput').value.trim();
+  if (!code) { document.getElementById('joinMsg').textContent = 'Enter the host\'s code first.'; return; }
+  document.getElementById('joinMsg').textContent = 'Connecting…';
+  startJoin(code).then(() => {
+    // _onNetConnected fires automatically on channel open
+  }).catch(() => {
+    document.getElementById('joinMsg').textContent = 'Could not connect — check the code and try again.';
+  });
+});
+
+document.getElementById('joinCodeInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('joinConnectBtn').click();
 });
 
 function updateJoystickVisual(dx, dy) {
@@ -2047,6 +2480,255 @@ function loop(time) {
   draw();
   requestAnimationFrame(loop);
 }
+// ─── Networking (PeerJS) ──────────────────────────────────────────────────────
+
+let _peerjs = null, _conn = null;
+
+function _shortId() {
+  return Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+function _destroyPeer() {
+  if (_conn)   { _conn.close();   _conn   = null; }
+  if (_peerjs) { _peerjs.destroy(); _peerjs = null; }
+  netConnected = false;
+}
+
+function _makePeer(id) {
+  return new Peer(id, { config: { iceServers: ICE_SERVERS } });
+}
+
+function startHost() {
+  _destroyPeer();
+  return new Promise((resolve, reject) => {
+    _peerjs = _makePeer(_shortId());
+    _peerjs.on('open', id => resolve(id));
+    _peerjs.on('error', reject);
+    _peerjs.on('connection', conn => {
+      _conn = conn;
+      conn.on('open',  () => { netConnected = true; netLost = false; _onNetConnected(); });
+      conn.on('data',  _onChannelMessage);
+      conn.on('close', _onDisconnect);
+      conn.on('error', _onDisconnect);
+    });
+  });
+}
+
+function startJoin(peerId) {
+  _destroyPeer();
+  return new Promise((resolve, reject) => {
+    _peerjs = _makePeer(_shortId());
+    _peerjs.on('open', () => {
+      _conn = _peerjs.connect(peerId.trim().toUpperCase(), { reliable: false, serialization: 'json' });
+      _conn.on('open',  () => { netConnected = true; netLost = false; resolve(); _onNetConnected(); });
+      _conn.on('data',  _onChannelMessage);
+      _conn.on('close', _onDisconnect);
+      _conn.on('error', _onDisconnect);
+    });
+    _peerjs.on('error', reject);
+  });
+}
+
+function _netSend(obj) {
+  if (_conn && _conn.open) _conn.send(obj);
+}
+
+function _onDisconnect() {
+  if (!netConnected && !gameRunning) return; // already handled or never connected mid-game
+  netConnected = false;
+  _destroyPeer();
+
+  if (netRole === 'host') {
+    // Guest dropped — demote to solo, game continues
+    player2 = null;
+    netRole = null;
+    let bar = document.getElementById('netStatus');
+    bar.textContent = '⚠ P2 DISCONNECTED';
+    bar.style.color = '#fa0';
+    setTimeout(() => {
+      bar.textContent = '● SOLO';
+      bar.style.color = '';
+    }, 3000);
+  } else {
+    // Host dropped — show overlay then return to menu
+    gameRunning = false;
+    resetInputState();
+    sndEngineUpdate(false);
+    setTimeout(() => document.exitPointerLock?.(), 0);
+    let bar = document.getElementById('netStatus');
+    bar.textContent = '⚠ HOST DISCONNECTED';
+    bar.style.color = '#f44';
+    setTimeout(() => {
+      bar.textContent = '';
+      bar.classList.remove('active');
+      bar.style.color = '';
+      netRole = null;
+      document.getElementById('startScreen').classList.remove('hidden');
+      showStartButtons();
+    }, 2500);
+  }
+}
+
+function _guestSpawnExhaust() {
+  // Player 1 — proxy thrust from speed (host doesn't send keystate)
+  if (Math.hypot(player.vx, player.vy) > 50 && Math.random() < 0.4)
+    spawnExhaust(player, player.ghost ? '#666' : '#0af');
+
+  // Player 2 — exact, because we know our own keys
+  if (player2 && keys['w']) {
+    let ex = player2.x - Math.cos(player2.angle) * 18;
+    let ey = player2.y - Math.sin(player2.angle) * 18;
+    for (let i = 0; i < 2; i++) {
+      let spread = (Math.random() - 0.5) * 0.6;
+      let a = player2.angle + Math.PI + spread;
+      let s = 80 + Math.random() * 60;
+      addParticle({ x: ex, y: ey,
+        vx: Math.cos(a)*s + player2.vx*0.3, vy: Math.sin(a)*s + player2.vy*0.3,
+        life: 0.3 + Math.random()*0.2, maxLife: 0.5, color: player2.ghost ? '#666' : '#f4f', size: 2 + Math.random()*2 });
+    }
+  }
+
+  // Enemies — look up exhaustColor from ENEMY_DEFS by type
+  for (let e of enemies) {
+    let col = (ENEMY_DEFS[e.type] || {}).exhaustColor;
+    if (!col) continue;
+    if (Math.hypot(e.vx, e.vy) > 30 && Math.random() < 0.4) spawnExhaust(e, col);
+  }
+
+  // Allies
+  for (let a of allies) {
+    if (Math.hypot(a.vx, a.vy) > 30 && Math.random() < 0.4) spawnExhaust(a, '#0af');
+  }
+}
+
+function _onNetConnected() {
+  document.getElementById('startScreen').classList.add('hidden');
+  let bar = document.getElementById('netStatus');
+  bar.textContent = netRole === 'host' ? '● P1 HOST' : '● P2 GUEST';
+  bar.classList.add('active');
+  _initAudio();
+  if (netRole === 'host') {
+    initGame();
+    showMobileControls(true);
+    gameRunning = true;
+  } else {
+    _initGameGuest();
+    showMobileControls(true);
+    gameRunning = true;
+  }
+}
+
+function _initGameGuest() {
+  resetInputState();
+  enemies = []; projectiles = []; particles = []; powerups = []; allies = []; planets = [];
+  score = 0; wave = 0; lives = 3; lives2 = 3; invincTimer = 0; invincTimer2 = 0;
+  player  = { x: 0,   y: 0, vx: 0, vy: 0, angle: -Math.PI/2, hp: 100, maxHp: 100, radius: 16 };
+  player2 = { x: 120, y: 0, vx: 0, vy: 0, angle: -Math.PI/2, hp: 100, maxHp: 100, radius: 16 };
+  plasmaEnergy = plasmaMax; missileEnergy = missileMax;
+  p2PlasmaEnergy = plasmaMax; p2MissileEnergy = missileMax;
+  shieldTimer = 0; spreadTimer = 0; empTimer = 0; homingTimer = 0;
+  p2ShieldTimer = 0; p2SpreadTimer = 0; p2HomingTimer = 0;
+  empWave = 0; empWaveMax = 0;
+  camX = 0; camY = 0; shakeX = 0; shakeY = 0; shakeDur = 0;
+  makeStars();
+}
+
+function _onChannelMessage(msg) {
+  if (typeof msg === 'string') { try { msg = JSON.parse(msg); } catch { return; } }
+
+  if (netRole === 'host' && msg.t === 'input') {
+    guestInput.w  = msg.w;  guestInput.s  = msg.s;
+    guestInput.a  = msg.a;  guestInput.d  = msg.d;
+    guestInput.md = msg.md; guestInput.rd = msg.rd;
+    guestInput.mx += msg.mx;
+  } else if (netRole === 'guest' && msg.t === 'state') {
+    _applyHostState(msg);
+  } else if (netRole === 'guest' && msg.t === 'gameover') {
+    gameOver();
+  }
+}
+
+function _sendGuestInput() {
+  if (!netConnected) return;
+  _netSend({
+    t: 'input',
+    w: !!keys['w'], s: !!keys['s'], a: !!keys['a'], d: !!keys['d'],
+    md: mouseDown, rd: rightDown, mx: mouseDX,
+  });
+}
+
+function _sendHostState() {
+  if (!netConnected) return;
+  let includePlanets = !hostStateSentFirst;
+  let msg = {
+    t: 'state',
+    p1: { x: player.x, y: player.y, vx: player.vx, vy: player.vy, angle: player.angle,
+          hp: player.hp, lives, inv: invincTimer, gh: player.ghost ? 1 : 0,
+          sh: shieldTimer, sp: spreadTimer, em: empTimer, ho: homingTimer,
+          pe: plasmaEnergy, me: missileEnergy },
+    p2: { x: player2.x, y: player2.y, vx: player2.vx, vy: player2.vy, angle: player2.angle,
+          hp: player2.hp, lives2, inv: invincTimer2, gh: player2.ghost ? 1 : 0,
+          sh: p2ShieldTimer, sp: p2SpreadTimer, ho: p2HomingTimer,
+          pe: p2PlasmaEnergy, me: p2MissileEnergy },
+    en: enemies.map(e => [e.x, e.y, e.vx, e.vy, e.angle, e.hp, e.maxHp, e.type, e.radius]),
+    pr: projectiles.map(p => [p.x, p.y, p.vx, p.vy, p.angle, p.type, p.owner, p.radius, p.life, p.homing ? 1 : 0, p.color]),
+    al: allies.map(a => [a.x, a.y, a.vx, a.vy, a.angle, a.hp, a.maxHp, a.radius]),
+    pu: powerups.map(p => [p.x, p.y, p.type, p.life]),
+    sc: score, wv: wave, emp: empWave, empM: empWaveMax,
+  };
+  if (includePlanets) {
+    msg.pl = planets.map(p => ({ x: p.x, y: p.y, r: p.radius, c: p.color, ac: p.accent, g: p.glow }));
+    hostStateSentFirst = true;
+  }
+  _netSend(msg);
+}
+
+function _applyHostState(msg) {
+  if (msg.p1) {
+    let p = msg.p1;
+    player.x = p.x; player.y = p.y; player.vx = p.vx; player.vy = p.vy;
+    player.angle = p.angle; player.hp = p.hp;
+    lives = p.lives; invincTimer = p.inv; player.ghost = !!p.gh;
+    shieldTimer = p.sh; spreadTimer = p.sp; empTimer = p.em; homingTimer = p.ho;
+    plasmaEnergy = p.pe; missileEnergy = p.me;
+  }
+  if (msg.p2 && player2) {
+    let p = msg.p2;
+    player2.x = p.x; player2.y = p.y; player2.vx = p.vx; player2.vy = p.vy;
+    player2.angle = p.angle; player2.hp = p.hp;
+    lives2 = p.lives2; invincTimer2 = p.inv; player2.ghost = !!p.gh;
+    p2ShieldTimer = p.sh; p2SpreadTimer = p.sp; p2HomingTimer = p.ho;
+    p2PlasmaEnergy = p.pe; p2MissileEnergy = p.me;
+  }
+  enemies = (msg.en || []).map(e => ({
+    x: e[0], y: e[1], vx: e[2], vy: e[3], angle: e[4],
+    hp: e[5], maxHp: e[6], type: e[7], radius: e[8],
+    color: (ENEMY_DEFS[e[7]] || {}).color || '#f44',
+    accent: (ENEMY_DEFS[e[7]] || {}).accent || '#f88',
+  }));
+  projectiles = (msg.pr || []).map(p => ({
+    x: p[0], y: p[1], vx: p[2], vy: p[3], angle: p[4],
+    type: p[5], owner: p[6], radius: p[7], life: p[8], homing: p[9] === 1, color: p[10],
+  }));
+  allies = (msg.al || []).map(a => ({
+    x: a[0], y: a[1], vx: a[2], vy: a[3], angle: a[4],
+    hp: a[5], maxHp: a[6], radius: a[7],
+  }));
+  powerups = (msg.pu || []).map(p => ({ x: p[0], y: p[1], type: p[2], life: p[3], radius: 12, vx: 0, vy: 0 }));
+  score = msg.sc || 0; wave = msg.wv || 0;
+  empWave = msg.emp || 0; empWaveMax = msg.empM || 0;
+  if (msg.pl) {
+    planets = msg.pl.map(p => {
+      let g = ctx.createRadialGradient(p.x - p.r*0.3, p.y - p.r*0.3, p.r*0.1, p.x, p.y, p.r);
+      g.addColorStop(0, p.ac); g.addColorStop(1, p.c);
+      return { x: p.x, y: p.y, radius: p.r, color: p.c, accent: p.ac, glow: p.g,
+               dangerZone: p.r * 1.25, dangerMargin: p.r * 0.25, grad: g };
+    });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 mobileSetup();
 requestAnimationFrame(t => { lastTime = t; requestAnimationFrame(loop); });
 </script>
