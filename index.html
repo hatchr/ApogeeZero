@@ -354,7 +354,7 @@ let gameRunning = false, gameOverActive = false;
 let lastTime = 0, plasmaCD = 0, missileCD = 0;
 let invincTimer = 0;
 let shieldTimer = 0, spreadTimer = 0, empTimer = 0, homingTimer = 0;
-let empWave = 0, empWaveMax = 0;
+let empWave = 0, empWaveMax = 0, empOriginX = 0, empOriginY = 0;
 let plasmaEnergy = 100, plasmaMax = 100, plasmaRecharge = 15; // per second
 let missileEnergy = 100, missileMax = 100, missileRecharge = 8; // per second
 let plasmaCost = 5, missileCost = 20;
@@ -1573,7 +1573,7 @@ function updatePowerups(dt) {
           for (let a of allies) a.spinRate = (Math.random() - 0.5) * 8;
           spawnParticles(player2.x, player2.y, '#ff0', 30, 200);
           spawnParticles(player2.x, player2.y, '#fff', 15, 150);
-          screenShake(0.4); sndEMP(); empWave = 0; empWaveMax = 2000;
+          screenShake(0.4); sndEMP(); empWave = 0; empWaveMax = 2000; empOriginX = player2.x; empOriginY = player2.y;
         }
         spawnParticles(pu.x, pu.y, POWERUP_DEFS[pu.type].color, 10, 80);
         sndPickup(pu.type); powerups.splice(i, 1); continue;
@@ -1617,7 +1617,7 @@ function updatePowerups(dt) {
         spawnParticles(player.x, player.y, '#fff', 15, 150);
         screenShake(0.4);
         sndEMP();
-        empWave = 0; empWaveMax = 2000;
+        empWave = 0; empWaveMax = 2000; empOriginX = player.x; empOriginY = player.y;
       }
       powerups.splice(i, 1);
     }
@@ -1997,14 +1997,14 @@ function draw() {
     glow(15, '#ff0');
     ctx.lineWidth = 4 * (1 - progress) + 1;
     ctx.beginPath();
-    ctx.arc(player.x, player.y, empWave, 0, Math.PI * 2);
+    ctx.arc(empOriginX, empOriginY, empWave, 0, Math.PI * 2);
     ctx.stroke();
     // Inner brighter ring
     ctx.globalAlpha = alpha * 0.4;
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2 * (1 - progress);
     ctx.beginPath();
-    ctx.arc(player.x, player.y, empWave * 0.95, 0, Math.PI * 2);
+    ctx.arc(empOriginX, empOriginY, empWave * 0.95, 0, Math.PI * 2);
     ctx.stroke();
     ctx.globalAlpha = 1;
     glow(0);
@@ -2759,7 +2759,7 @@ function _sendHostState() {
     pr: projectiles.map(p => [p.x, p.y, p.vx, p.vy, p.angle, p.type, p.owner, p.radius, p.life, p.homing ? 1 : 0, p.color]),
     al: allies.map(a => [a.x, a.y, a.vx, a.vy, a.angle, a.hp, a.maxHp, a.radius]),
     pu: powerups.map(p => [p.x, p.y, p.type, p.life]),
-    sc: score, wv: wave, emp: empWave, empM: empWaveMax,
+    sc: score, wv: wave, emp: empWave, empM: empWaveMax, empOX: empOriginX, empOY: empOriginY, shk: shakeDur,
   };
   if (includePlanets) {
     msg.pl = planets.map(p => ({ x: p.x, y: p.y, r: p.radius, c: p.color, ac: p.accent, g: p.glow, gp: p.gravParam }));
@@ -2790,23 +2790,64 @@ function _applyHostState(msg) {
     p2ShieldTimer = p.sh; p2SpreadTimer = p.sp; p2HomingTimer = p.ho;
     p2PlasmaEnergy = p.pe; p2MissileEnergy = p.me;
   }
-  enemies = (msg.en || []).map(e => ({
+  // Diff enemies — detect deaths and spawn local explosion effects
+  let newEnemies = (msg.en || []).map(e => ({
     x: e[0], y: e[1], vx: e[2], vy: e[3], angle: e[4],
     hp: e[5], maxHp: e[6], type: e[7], radius: e[8],
     color: (ENEMY_DEFS[e[7]] || {}).color || '#f44',
     accent: (ENEMY_DEFS[e[7]] || {}).accent || '#f88',
   }));
-  projectiles = (msg.pr || []).map(p => ({
+  for (let old of enemies) {
+    let alive = newEnemies.some(e => e.type === old.type && Math.hypot(e.x - old.x, e.y - old.y) < 500);
+    if (!alive) {
+      let col = (ENEMY_DEFS[old.type] || {}).color || '#f44';
+      if (old.type === 'kamikaze') {
+        spawnParticles(old.x, old.y, '#cf0', 25, 250); spawnParticles(old.x, old.y, '#ff0', 15, 180);
+        screenShake(0.3);
+      } else {
+        spawnParticles(old.x, old.y, col, 20, 200); spawnParticles(old.x, old.y, '#ff0', 10, 150);
+        screenShake(0.15);
+      }
+      sndExplosion(false);
+    }
+  }
+  enemies = newEnemies;
+
+  // Diff projectiles — detect hits (disappeared with life remaining)
+  let newProjectiles = (msg.pr || []).map(p => ({
     x: p[0], y: p[1], vx: p[2], vy: p[3], angle: p[4],
     type: p[5], owner: p[6], radius: p[7], life: p[8], homing: p[9] === 1, color: p[10],
   }));
-  allies = (msg.al || []).map(a => ({
+  for (let old of projectiles) {
+    if (old.life < 0.15) continue; // expired naturally, no effect
+    let stillExists = newProjectiles.some(p => p.owner === old.owner && Math.hypot(p.x - old.x, p.y - old.y) < 120);
+    if (!stillExists) spawnParticles(old.x, old.y, old.color || '#f88', 4, 80);
+  }
+  projectiles = newProjectiles;
+
+  // Diff allies — detect deaths
+  let newAllies = (msg.al || []).map(a => ({
     x: a[0], y: a[1], vx: a[2], vy: a[3], angle: a[4],
     hp: a[5], maxHp: a[6], radius: a[7],
   }));
-  powerups = (msg.pu || []).map(p => ({ x: p[0], y: p[1], type: p[2], life: p[3], radius: 12, vx: 0, vy: 0 }));
+  for (let old of allies) {
+    let alive = newAllies.some(a => Math.hypot(a.x - old.x, a.y - old.y) < 500);
+    if (!alive) { spawnParticles(old.x, old.y, '#0ff', 20, 200); sndExplosion(false); screenShake(0.15); }
+  }
+  allies = newAllies;
+
+  // Diff powerups — play pickup sound when one disappears
+  let newPowerups = (msg.pu || []).map(p => ({ x: p[0], y: p[1], type: p[2], life: p[3], radius: 12, vx: 0, vy: 0 }));
+  for (let old of powerups) {
+    let stillExists = newPowerups.some(p => p.type === old.type && Math.hypot(p.x - old.x, p.y - old.y) < 100);
+    if (!stillExists) { sndPickup(old.type); if (old.type === 'emp') sndEMP(); }
+  }
+  powerups = newPowerups;
+
   score = msg.sc || 0; wave = msg.wv || 0;
   empWave = msg.emp || 0; empWaveMax = msg.empM || 0;
+  if (msg.empOX !== undefined) { empOriginX = msg.empOX; empOriginY = msg.empOY; }
+  if (msg.shk) shakeDur = Math.max(shakeDur, msg.shk);
   if (msg.pl) {
     planets = msg.pl.map(p => {
       let g = ctx.createRadialGradient(p.x - p.r*0.3, p.y - p.r*0.3, p.r*0.1, p.x, p.y, p.r);
