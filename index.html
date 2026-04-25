@@ -388,7 +388,7 @@ let p2ShieldTimer = 0, p2SpreadTimer = 0, p2HomingTimer = 0;
 let lives2 = 3, invincTimer2 = 0;
 
 // Host stores latest input received from guest
-let guestInput = { w: false, s: false, a: false, d: false, md: false, rd: false, mx: 0 };
+let guestInput = { w: false, s: false, a: false, d: false, md: false, rd: false, mx: 0, mr: 0 };
 
 const STORAGE_KEYS = {
   leaderboard: 'sd_leaderboard',
@@ -1094,7 +1094,8 @@ function updatePlayer2(dt) {
   let gi = guestInput;
 
   player2.angle += gi.mx * 0.004;
-  gi.mx = 0;
+  if (gi.mr) player2.angle += gi.mr * RJOY_RATE * dt;
+  gi.mx = 0; gi.mr = 0;
 
   let f = (gi.w ? 1 : 0) - (gi.s ? 1 : 0);
   let s = (gi.d ? 1 : 0) - (gi.a ? 1 : 0);
@@ -2643,7 +2644,7 @@ function _onChannelMessage(msg) {
     guestInput.w  = msg.w;  guestInput.s  = msg.s;
     guestInput.a  = msg.a;  guestInput.d  = msg.d;
     guestInput.md = msg.md; guestInput.rd = msg.rd;
-    guestInput.mx += msg.mx;
+    guestInput.mx += msg.mx; guestInput.mr = msg.mr || 0;
   } else if (netRole === 'guest' && msg.t === 'state') {
     _applyHostState(msg);
   } else if (netRole === 'guest' && msg.t === 'gameover') {
@@ -2656,7 +2657,7 @@ function _sendGuestInput() {
   _netSend({
     t: 'input',
     w: !!keys['w'], s: !!keys['s'], a: !!keys['a'], d: !!keys['d'],
-    md: mouseDown, rd: rightDown, mx: mouseDX,
+    md: mouseDown, rd: rightDown, mx: mouseDX, mr: mRJoyDX,
   });
 }
 
