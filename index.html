@@ -389,6 +389,7 @@ let lives2 = 3, invincTimer2 = 0;
 
 // Host stores latest input received from guest
 let guestInput = { w: false, s: false, a: false, d: false, md: false, rd: false, mx: 0, mr: 0 };
+let guestFireMd = false, guestFireRd = false; // set by guest-side autofire
 
 const STORAGE_KEYS = {
   leaderboard: 'sd_leaderboard',
@@ -920,11 +921,11 @@ function updatePhysics(dt) {
       if (lives <= 0) { player.ghost = true; player.hp = player.maxHp; invincTimer = 0; checkGameOver(); } else { player.hp = player.maxHp; player.vx = 0; player.vy = 0; invincTimer = 2.5; resetInputState(); }
     }
 
-    // Player 2 planet collision
-    if (player2) {
+    // Player 2 planet collision (skipped for ghost — they float through)
+    if (player2 && !player2.ghost) {
       let hpBefore2 = player2.hp;
       let p2Died = handlePlanetCollision(player2, pl);
-      if (invincTimer2 > 0 || p2ShieldTimer > 0 || player2.ghost) {
+      if (invincTimer2 > 0 || p2ShieldTimer > 0) {
         player2.hp = hpBefore2;
       } else if (p2Died) {
         lives2--;
@@ -1092,17 +1093,8 @@ function updatePlayer(dt) {
 function updatePlayer2(dt) {
   if (!player2 || netRole !== 'host') return;
   let gi = guestInput;
-
-  player2.angle += gi.mx * 0.004;
-  if (gi.mr) player2.angle += gi.mr * RJOY_RATE * dt;
+  // Position/angle/velocity are now guest-authoritative (set in _onChannelMessage)
   gi.mx = 0; gi.mr = 0;
-
-  let f = (gi.w ? 1 : 0) - (gi.s ? 1 : 0);
-  let s = (gi.d ? 1 : 0) - (gi.a ? 1 : 0);
-  thrustLocal(player2, f, s, 300 * dt);
-  let damp = Math.pow(0.99, dt * 60);
-  player2.vx *= damp; player2.vy *= damp;
-  player2.x += player2.vx * dt; player2.y += player2.vy * dt;
 
   // Exhaust
   if (gi.w) {
@@ -1644,9 +1636,24 @@ function updateParticles(dt) {
 function update(dt) {
   if (!gameRunning) return;
 
-  // Guest: send inputs and render received state — no local simulation
+  // Guest: run local P2 physics + autofire, extrapolate NPCs, send inputs
   if (netRole === 'guest') {
-    _sendGuestInput();
+    if (invincTimer2 > 0) invincTimer2 -= dt;
+    if (p2ShieldTimer  > 0) p2ShieldTimer  -= dt;
+    if (p2SpreadTimer  > 0) p2SpreadTimer  -= dt;
+    if (p2HomingTimer  > 0) p2HomingTimer  -= dt;
+    _guestUpdatePlayer2(dt);
+    for (let e of enemies) { e.x += e.vx * dt; e.y += e.vy * dt; }
+    for (let a of allies)  { a.x += a.vx * dt; a.y += a.vy * dt; }
+    _sendGuestInput();  // sends pre-bounce position so host can detect collision + apply damage
+    // Apply bounce locally after sending — host and guest use same math, positions stay in sync
+    if (player2 && !player2.ghost) {
+      for (let pl of planets) {
+        let hpBefore = player2.hp;
+        handlePlanetCollision(player2, pl);
+        if (invincTimer2 > 0 || p2ShieldTimer > 0 || player2.hp <= 0) player2.hp = hpBefore;
+      }
+    }
     mouseDX = 0;
     sndEngineUpdate(!!(keys['w'] || keys['s'] || keys['a'] || keys['d']));
     _guestSpawnExhaust();
@@ -2573,6 +2580,71 @@ function _onDisconnect() {
   }
 }
 
+function _guestUpdatePlayer2(dt) {
+  if (!player2) return;
+
+  // Rotation — immediate, no round-trip
+  player2.angle += mouseDX * 0.004;
+  if (mRJoyDX) player2.angle += mRJoyDX * RJOY_RATE * dt;
+
+  // Gravity
+  applyGravity(player2, dt);
+
+  // Thrust
+  if (!player2.ghost) {
+    let f = (keys['w'] ? 1 : 0) - (keys['s'] ? 1 : 0);
+    let s = (keys['d'] ? 1 : 0) - (keys['a'] ? 1 : 0);
+    thrustLocal(player2, f, s, 300 * dt);
+  }
+  let damp = Math.pow(0.99, dt * 60);
+  player2.vx *= damp; player2.vy *= damp;
+  player2.x += player2.vx * dt; player2.y += player2.vy * dt;
+
+  // Local ammo estimate (periodically corrected by host state packets)
+  let plasmaRate2 = p2SpreadTimer > 0 ? plasmaRecharge * 6 : plasmaRecharge;
+  let missileRate2 = p2HomingTimer > 0 ? missileRecharge * 2 : missileRecharge;
+  p2PlasmaEnergy = Math.min(plasmaMax, p2PlasmaEnergy + plasmaRate2 * dt);
+  p2MissileEnergy = Math.min(missileMax, p2MissileEnergy + missileRate2 * dt);
+  p2PlasmaCD -= dt; p2MissileCD -= dt;
+
+  // Mobile autofire using local angle + extrapolated enemy positions
+  if (isMobile && !player2.ghost && invincTimer2 <= 0 && enemies.length > 0) {
+    let useDef = mobileAutoSeq < 3 ? PROJECTILE_DEFS.plasma : PROJECTILE_DEFS.missile;
+    let useRange = useDef.speed * useDef.life;
+    let onTarget = false;
+    for (let e of enemies) {
+      let edx = e.x - player2.x, edy = e.y - player2.y;
+      if (edx*edx + edy*edy > useRange * useRange) continue;
+      let la = leadShot(player2.x, player2.y, player2.vx, player2.vy,
+                        e.x, e.y, e.vx || 0, e.vy || 0, useDef.speed);
+      let d = la - player2.angle;
+      while (d >  Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      if (Math.abs(d) < AUTOFIRE_ARC) { onTarget = true; break; }
+    }
+    if (onTarget) {
+      let pCost2 = p2SpreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
+      if (mobileAutoSeq < 3) {
+        if (p2PlasmaCD <= 0 && p2PlasmaEnergy >= pCost2) {
+          guestFireMd = true;
+          p2PlasmaEnergy -= pCost2; p2PlasmaCD = 0.15;
+          mobileAutoSeq++;
+        }
+      } else {
+        if (p2MissileCD <= 0 && p2MissileEnergy >= missileCost) {
+          guestFireRd = true;
+          p2MissileEnergy -= missileCost; p2MissileCD = 0.5;
+          mobileAutoSeq = 0;
+        } else if (p2PlasmaCD <= 0 && p2PlasmaEnergy >= pCost2) {
+          guestFireMd = true;
+          p2PlasmaEnergy -= pCost2; p2PlasmaCD = 0.15;
+          mobileAutoSeq = 0;
+        }
+      }
+    }
+  }
+}
+
 function _guestSpawnExhaust() {
   // Player 1 — proxy thrust from speed (host doesn't send keystate)
   if (Math.hypot(player.vx, player.vy) > 50 && Math.random() < 0.4)
@@ -2641,6 +2713,11 @@ function _onChannelMessage(msg) {
   if (typeof msg === 'string') { try { msg = JSON.parse(msg); } catch { return; } }
 
   if (netRole === 'host' && msg.t === 'input') {
+    if (player2 && msg.x !== undefined) {
+      player2.x = msg.x; player2.y = msg.y;
+      player2.vx = msg.vx; player2.vy = msg.vy;
+      player2.angle = msg.angle;
+    }
     guestInput.w  = msg.w;  guestInput.s  = msg.s;
     guestInput.a  = msg.a;  guestInput.d  = msg.d;
     guestInput.md = msg.md; guestInput.rd = msg.rd;
@@ -2653,12 +2730,15 @@ function _onChannelMessage(msg) {
 }
 
 function _sendGuestInput() {
-  if (!netConnected) return;
+  if (!netConnected || !player2) return;
   _netSend({
     t: 'input',
+    x: player2.x, y: player2.y, vx: player2.vx, vy: player2.vy, angle: player2.angle,
     w: !!keys['w'], s: !!keys['s'], a: !!keys['a'], d: !!keys['d'],
-    md: mouseDown, rd: rightDown, mx: mouseDX, mr: mRJoyDX,
+    md: mouseDown || guestFireMd, rd: rightDown || guestFireRd,
+    mx: mouseDX, mr: mRJoyDX,
   });
+  guestFireMd = false; guestFireRd = false;
 }
 
 function _sendHostState() {
@@ -2681,7 +2761,7 @@ function _sendHostState() {
     sc: score, wv: wave, emp: empWave, empM: empWaveMax,
   };
   if (includePlanets) {
-    msg.pl = planets.map(p => ({ x: p.x, y: p.y, r: p.radius, c: p.color, ac: p.accent, g: p.glow }));
+    msg.pl = planets.map(p => ({ x: p.x, y: p.y, r: p.radius, c: p.color, ac: p.accent, g: p.glow, gp: p.gravParam }));
     hostStateSentFirst = true;
   }
   _netSend(msg);
@@ -2698,8 +2778,13 @@ function _applyHostState(msg) {
   }
   if (msg.p2 && player2) {
     let p = msg.p2;
-    player2.x = p.x; player2.y = p.y; player2.vx = p.vx; player2.vy = p.vy;
-    player2.angle = p.angle; player2.hp = p.hp;
+    // Snap position/velocity on respawn (host signals with high invincTimer)
+    if (p.inv >= 2.0) {
+      player2.x = p.x; player2.y = p.y;
+      player2.vx = p.vx; player2.vy = p.vy;
+    }
+    // Position/angle are otherwise guest-authoritative — don't overwrite
+    player2.hp = p.hp;
     lives2 = p.lives2; invincTimer2 = p.inv; player2.ghost = !!p.gh;
     p2ShieldTimer = p.sh; p2SpreadTimer = p.sp; p2HomingTimer = p.ho;
     p2PlasmaEnergy = p.pe; p2MissileEnergy = p.me;
@@ -2726,7 +2811,7 @@ function _applyHostState(msg) {
       let g = ctx.createRadialGradient(p.x - p.r*0.3, p.y - p.r*0.3, p.r*0.1, p.x, p.y, p.r);
       g.addColorStop(0, p.ac); g.addColorStop(1, p.c);
       return { x: p.x, y: p.y, radius: p.r, color: p.c, accent: p.ac, glow: p.g,
-               dangerZone: p.r * 1.25, dangerMargin: p.r * 0.25, grad: g };
+               gravParam: p.gp, dangerZone: p.r * 1.25, dangerMargin: p.r * 0.25, grad: g };
     });
   }
 }
