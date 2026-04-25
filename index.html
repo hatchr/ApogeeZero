@@ -1643,8 +1643,9 @@ function update(dt) {
     if (p2SpreadTimer  > 0) p2SpreadTimer  -= dt;
     if (p2HomingTimer  > 0) p2HomingTimer  -= dt;
     _guestUpdatePlayer2(dt);
-    for (let e of enemies) { e.x += e.vx * dt; e.y += e.vy * dt; }
-    for (let a of allies)  { a.x += a.vx * dt; a.y += a.vy * dt; }
+    for (let e of enemies)    { e.x += e.vx * dt; e.y += e.vy * dt; }
+    for (let a of allies)     { a.x += a.vx * dt; a.y += a.vy * dt; }
+    for (let p of projectiles) { p.x += p.vx * dt; p.y += p.vy * dt; }
     _sendGuestInput();  // sends pre-bounce position so host can detect collision + apply damage
     // Apply bounce locally after sending — host and guest use same math, positions stay in sync
     if (player2 && !player2.ghost) {
