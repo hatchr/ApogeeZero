@@ -149,6 +149,7 @@ canvas { display: block; }
              text-align:center;width:180px;padding:6px;outline:none;font-family:inherit;text-transform:uppercase">
     <div class="net-btns">
       <button class="net-btn" id="joinConnectBtn">JOIN</button>
+      <button class="net-btn" id="pasteCodeBtn">PASTE</button>
       <button class="net-btn dim" id="joinBackBtn">BACK</button>
     </div>
     <div class="net-msg" id="joinMsg"></div>
@@ -2358,6 +2359,23 @@ document.getElementById('joinConnectBtn').addEventListener('click', () => {
 
 document.getElementById('joinCodeInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('joinConnectBtn').click();
+});
+
+document.getElementById('pasteCodeBtn').addEventListener('click', () => {
+  let input = document.getElementById('joinCodeInput');
+  let msg   = document.getElementById('joinMsg');
+  let applyCode = text => {
+    let code = (text || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+    if (code) { input.value = code; document.getElementById('joinConnectBtn').click(); }
+    else { msg.textContent = 'Nothing useful in clipboard.'; }
+  };
+  if (navigator.clipboard && typeof navigator.clipboard.readText === 'function') {
+    navigator.clipboard.readText().then(applyCode).catch(() => {
+      input.focus(); msg.textContent = 'Tap and hold the field to paste.';
+    });
+  } else {
+    input.focus(); msg.textContent = 'Tap and hold the field to paste.';
+  }
 });
 
 function updateJoystickVisual(dx, dy) {
