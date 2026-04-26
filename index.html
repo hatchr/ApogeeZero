@@ -976,6 +976,73 @@ function updatePhysics(dt) {
   }
 }
 
+// ── Shared player weapon helpers ─────────────────────────────────────────────
+
+// Recharge plasma/missile energy and tick cooldowns for P1 or P2.
+function rechargeAmmo(isP2, dt) {
+  if (isP2) {
+    let pRate = p2SpreadTimer > 0 ? plasmaRecharge * 6 : plasmaRecharge;
+    let mRate = p2HomingTimer > 0 ? missileRecharge * 2 : missileRecharge;
+    p2PlasmaEnergy  = Math.min(plasmaMax,  p2PlasmaEnergy  + pRate * dt);
+    p2MissileEnergy = Math.min(missileMax, p2MissileEnergy + mRate * dt);
+    p2PlasmaCD -= dt; p2MissileCD -= dt;
+  } else {
+    let pRate = spreadTimer > 0 ? plasmaRecharge * 6 : plasmaRecharge;
+    let mRate = homingTimer > 0 ? missileRecharge * 2 : missileRecharge;
+    plasmaEnergy  = Math.min(plasmaMax,  plasmaEnergy  + pRate * dt);
+    missileEnergy = Math.min(missileMax, missileEnergy + mRate * dt);
+    plasmaCD -= dt; missileCD -= dt;
+  }
+}
+
+// Fire plasma and/or missile for a player ship. Reads/writes globals via isP2.
+function fireWeapons(ship, owner, fireP, fireR) {
+  let isP2 = owner === 'player2';
+  let pe  = isP2 ? p2PlasmaEnergy  : plasmaEnergy;
+  let me  = isP2 ? p2MissileEnergy : missileEnergy;
+  let pcd = isP2 ? p2PlasmaCD      : plasmaCD;
+  let mcd = isP2 ? p2MissileCD     : missileCD;
+  let spd = isP2 ? p2SpreadTimer   : spreadTimer;
+  let hom = isP2 ? p2HomingTimer   : homingTimer;
+  let pCost = spd > 0 ? plasmaCost * 3 : plasmaCost;
+  let fx = ship.x + Math.cos(ship.angle) * 20;
+  let fy = ship.y + Math.sin(ship.angle) * 20;
+  if (!ship.ghost && fireP && pcd <= 0 && pe >= pCost) {
+    if (spd > 0) {
+      fireProjectile(owner, fx, fy, ship.angle - 0.2, 'plasma', ship.vx, ship.vy);
+      fireProjectile(owner, fx, fy, ship.angle,       'plasma', ship.vx, ship.vy);
+      fireProjectile(owner, fx, fy, ship.angle + 0.2, 'plasma', ship.vx, ship.vy);
+    } else {
+      fireProjectile(owner, fx, fy, ship.angle, 'plasma', ship.vx, ship.vy);
+    }
+    pe -= pCost; pcd = 0.15;
+    sndPlasma(true);
+  }
+  if (!ship.ghost && fireR && mcd <= 0 && me >= missileCost) {
+    fireProjectile(owner, fx, fy, ship.angle, 'missile', ship.vx, ship.vy, { homing: hom > 0 });
+    me -= missileCost; mcd = 0.5;
+    sndMissileFire();
+  }
+  if (isP2) { p2PlasmaEnergy = pe; p2MissileEnergy = me; p2PlasmaCD = pcd; p2MissileCD = mcd; }
+  else       { plasmaEnergy = pe;   missileEnergy = me;   plasmaCD = pcd;   missileCD = mcd; }
+}
+
+// Returns true if an enemy is within autofire arc of ship's lead-shot heading.
+function mobileAutofireTarget(ship) {
+  let useDef = mobileAutoSeq < 3 ? PROJECTILE_DEFS.plasma : PROJECTILE_DEFS.missile;
+  let useRange = useDef.speed * useDef.life;
+  for (let e of enemies) {
+    let edx = e.x - ship.x, edy = e.y - ship.y;
+    if (edx*edx + edy*edy > useRange * useRange) continue;
+    let la = leadShot(ship.x, ship.y, ship.vx, ship.vy, e.x, e.y, e.vx||0, e.vy||0, useDef.speed);
+    let d = la - ship.angle;
+    while (d >  Math.PI) d -= Math.PI * 2;
+    while (d < -Math.PI) d += Math.PI * 2;
+    if (Math.abs(d) < AUTOFIRE_ARC) return true;
+  }
+  return false;
+}
+
 function updatePlayer(dt) {
   // Player rotation — mouse on desktop; right joystick applies a rate-based turn on mobile
   if (isMobile && mRJoyDX !== 0) player.angle += mRJoyDX * RJOY_RATE * dt;
@@ -1005,91 +1072,32 @@ function updatePlayer(dt) {
     }
   }
 
-  // Recharge ammo
-  let plasmaRate = spreadTimer > 0 ? plasmaRecharge * 6 : plasmaRecharge;
-  let missileRate = homingTimer > 0 ? missileRecharge * 2 : missileRecharge;
-  plasmaEnergy = Math.min(plasmaMax, plasmaEnergy + plasmaRate * dt);
-  missileEnergy = Math.min(missileMax, missileEnergy + missileRate * dt);
-
-  // Slowly regenerate health
+  rechargeAmmo(false, dt);
   player.hp = Math.min(player.maxHp, player.hp + 2 * dt);
-
-  // Player shooting
-  plasmaCD -= dt; missileCD -= dt;
-  let pCost = spreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
-  if (!player.ghost && mouseDown && plasmaCD <= 0 && plasmaEnergy >= pCost) {
-    let fx = player.x + Math.cos(player.angle)*20;
-    let fy = player.y + Math.sin(player.angle)*20;
-    if (spreadTimer > 0) {
-      fireProjectile('player', fx, fy, player.angle - 0.2, 'plasma', player.vx, player.vy);
-      fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
-      fireProjectile('player', fx, fy, player.angle + 0.2, 'plasma', player.vx, player.vy);
-    } else {
-      fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
-    }
-    plasmaEnergy -= pCost;
-    plasmaCD = 0.15;
-    sndPlasma(true);
-  }
-  if (!player.ghost && rightDown && missileCD <= 0 && missileEnergy >= missileCost) {
-    let fx = player.x + Math.cos(player.angle)*20;
-    let fy = player.y + Math.sin(player.angle)*20;
-    fireProjectile('player', fx, fy, player.angle, 'missile', player.vx, player.vy, { homing: homingTimer > 0 });
-    missileEnergy -= missileCost;
-    missileCD = 0.5;
-    sndMissileFire();
-  }
+  fireWeapons(player, 'player', mouseDown, rightDown);
 
   // Mobile autofire: plasma → plasma → plasma → missile, repeat.
-  // Uses leadShot to account for both ship and target velocity.
-  if (isMobile && enemies.length > 0) {
-    let useDef = mobileAutoSeq < 3 ? PROJECTILE_DEFS.plasma : PROJECTILE_DEFS.missile;
-    let useSpeed = useDef.speed;
-    let useRange = useDef.speed * useDef.life;
-    let onTarget = false;
-    for (let e of enemies) {
-      let edx = e.x - player.x, edy = e.y - player.y;
-      if (edx*edx + edy*edy > useRange * useRange) continue;
-      let la = leadShot(player.x, player.y, player.vx, player.vy,
-                        e.x, e.y, e.vx || 0, e.vy || 0, useSpeed);
-      let d = la - player.angle;
-      while (d >  Math.PI) d -= Math.PI * 2;
-      while (d < -Math.PI) d += Math.PI * 2;
-      if (Math.abs(d) < AUTOFIRE_ARC) { onTarget = true; break; }
-    }
-    if (onTarget) {
-      let fx = player.x + Math.cos(player.angle) * 20;
-      let fy = player.y + Math.sin(player.angle) * 20;
-      let plasmaFireCost = spreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
-      let firePlasma = () => {
-        if (spreadTimer > 0) {
-          fireProjectile('player', fx, fy, player.angle - 0.2, 'plasma', player.vx, player.vy);
-          fireProjectile('player', fx, fy, player.angle,       'plasma', player.vx, player.vy);
-          fireProjectile('player', fx, fy, player.angle + 0.2, 'plasma', player.vx, player.vy);
-        } else {
-          fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
-        }
-        plasmaEnergy -= plasmaFireCost;
-        plasmaCD = 0.15;
-        sndPlasma(true);
-      };
-      if (mobileAutoSeq < 3) {
-        if (plasmaCD <= 0 && plasmaEnergy >= plasmaFireCost) {
-          firePlasma();
-          mobileAutoSeq++;
-        }
+  if (isMobile && enemies.length > 0 && mobileAutofireTarget(player)) {
+    let fx = player.x + Math.cos(player.angle) * 20;
+    let fy = player.y + Math.sin(player.angle) * 20;
+    let pCost = spreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
+    let firePlasma = () => {
+      if (spreadTimer > 0) {
+        fireProjectile('player', fx, fy, player.angle - 0.2, 'plasma', player.vx, player.vy);
+        fireProjectile('player', fx, fy, player.angle,       'plasma', player.vx, player.vy);
+        fireProjectile('player', fx, fy, player.angle + 0.2, 'plasma', player.vx, player.vy);
       } else {
-        if (missileCD <= 0 && missileEnergy >= missileCost) {
-          fireProjectile('player', fx, fy, player.angle, 'missile', player.vx, player.vy, { homing: homingTimer > 0 });
-          missileEnergy -= missileCost;
-          missileCD = 0.5;
-          mobileAutoSeq = 0;
-          sndMissileFire();
-        } else if (plasmaCD <= 0 && plasmaEnergy >= plasmaFireCost) {
-          firePlasma();
-          mobileAutoSeq = 0;
-        }
+        fireProjectile('player', fx, fy, player.angle, 'plasma', player.vx, player.vy);
       }
+      plasmaEnergy -= pCost; plasmaCD = 0.15; sndPlasma(true);
+    };
+    if (mobileAutoSeq < 3) {
+      if (plasmaCD <= 0 && plasmaEnergy >= pCost) { firePlasma(); mobileAutoSeq++; }
+    } else {
+      if (missileCD <= 0 && missileEnergy >= missileCost) {
+        fireProjectile('player', fx, fy, player.angle, 'missile', player.vx, player.vy, { homing: homingTimer > 0 });
+        missileEnergy -= missileCost; missileCD = 0.5; mobileAutoSeq = 0; sndMissileFire();
+      } else if (plasmaCD <= 0 && plasmaEnergy >= pCost) { firePlasma(); mobileAutoSeq = 0; }
     }
   }
 }
@@ -1115,36 +1123,9 @@ function updatePlayer2(dt) {
     }
   }
 
-  // Ammo recharge
-  let plasmaRate2 = p2SpreadTimer > 0 ? plasmaRecharge * 6 : plasmaRecharge;
-  let missileRate2 = p2HomingTimer > 0 ? missileRecharge * 2 : missileRecharge;
-  p2PlasmaEnergy = Math.min(plasmaMax, p2PlasmaEnergy + plasmaRate2 * dt);
-  p2MissileEnergy = Math.min(missileMax, p2MissileEnergy + missileRate2 * dt);
-
+  rechargeAmmo(true, dt);
   player2.hp = Math.min(player2.maxHp, player2.hp + 2 * dt);
-
-  p2PlasmaCD -= dt; p2MissileCD -= dt;
-  let pCost2 = p2SpreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
-  if (!player2.ghost && gi.md && p2PlasmaCD <= 0 && p2PlasmaEnergy >= pCost2) {
-    let fx = player2.x + Math.cos(player2.angle)*20;
-    let fy = player2.y + Math.sin(player2.angle)*20;
-    if (p2SpreadTimer > 0) {
-      fireProjectile('player2', fx, fy, player2.angle - 0.2, 'plasma', player2.vx, player2.vy);
-      fireProjectile('player2', fx, fy, player2.angle,       'plasma', player2.vx, player2.vy);
-      fireProjectile('player2', fx, fy, player2.angle + 0.2, 'plasma', player2.vx, player2.vy);
-    } else {
-      fireProjectile('player2', fx, fy, player2.angle, 'plasma', player2.vx, player2.vy);
-    }
-    p2PlasmaEnergy -= pCost2; p2PlasmaCD = 0.15;
-    sndPlasma(true);
-  }
-  if (!player2.ghost && gi.rd && p2MissileCD <= 0 && p2MissileEnergy >= missileCost) {
-    let fx = player2.x + Math.cos(player2.angle)*20;
-    let fy = player2.y + Math.sin(player2.angle)*20;
-    fireProjectile('player2', fx, fy, player2.angle, 'missile', player2.vx, player2.vy, { homing: p2HomingTimer > 0 });
-    p2MissileEnergy -= missileCost; p2MissileCD = 0.5;
-    sndMissileFire();
-  }
+  fireWeapons(player2, 'player2', gi.md, gi.rd);
 }
 
 // ---------- NPC behaviors ----------
@@ -2689,45 +2670,20 @@ function _guestUpdatePlayer2(dt) {
   player2.x += player2.vx * dt; player2.y += player2.vy * dt;
 
   // Local ammo estimate (periodically corrected by host state packets)
-  let plasmaRate2 = p2SpreadTimer > 0 ? plasmaRecharge * 6 : plasmaRecharge;
-  let missileRate2 = p2HomingTimer > 0 ? missileRecharge * 2 : missileRecharge;
-  p2PlasmaEnergy = Math.min(plasmaMax, p2PlasmaEnergy + plasmaRate2 * dt);
-  p2MissileEnergy = Math.min(missileMax, p2MissileEnergy + missileRate2 * dt);
-  p2PlasmaCD -= dt; p2MissileCD -= dt;
+  rechargeAmmo(true, dt);
 
   // Mobile autofire using local angle + extrapolated enemy positions
-  if (isMobile && !player2.ghost && invincTimer2 <= 0 && enemies.length > 0) {
-    let useDef = mobileAutoSeq < 3 ? PROJECTILE_DEFS.plasma : PROJECTILE_DEFS.missile;
-    let useRange = useDef.speed * useDef.life;
-    let onTarget = false;
-    for (let e of enemies) {
-      let edx = e.x - player2.x, edy = e.y - player2.y;
-      if (edx*edx + edy*edy > useRange * useRange) continue;
-      let la = leadShot(player2.x, player2.y, player2.vx, player2.vy,
-                        e.x, e.y, e.vx || 0, e.vy || 0, useDef.speed);
-      let d = la - player2.angle;
-      while (d >  Math.PI) d -= Math.PI * 2;
-      while (d < -Math.PI) d += Math.PI * 2;
-      if (Math.abs(d) < AUTOFIRE_ARC) { onTarget = true; break; }
-    }
-    if (onTarget) {
-      let pCost2 = p2SpreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
-      if (mobileAutoSeq < 3) {
-        if (p2PlasmaCD <= 0 && p2PlasmaEnergy >= pCost2) {
-          guestFireMd = true;
-          p2PlasmaEnergy -= pCost2; p2PlasmaCD = 0.15;
-          mobileAutoSeq++;
-        }
-      } else {
-        if (p2MissileCD <= 0 && p2MissileEnergy >= missileCost) {
-          guestFireRd = true;
-          p2MissileEnergy -= missileCost; p2MissileCD = 0.5;
-          mobileAutoSeq = 0;
-        } else if (p2PlasmaCD <= 0 && p2PlasmaEnergy >= pCost2) {
-          guestFireMd = true;
-          p2PlasmaEnergy -= pCost2; p2PlasmaCD = 0.15;
-          mobileAutoSeq = 0;
-        }
+  if (isMobile && !player2.ghost && invincTimer2 <= 0 && enemies.length > 0 && mobileAutofireTarget(player2)) {
+    let pCost2 = p2SpreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
+    if (mobileAutoSeq < 3) {
+      if (p2PlasmaCD <= 0 && p2PlasmaEnergy >= pCost2) {
+        guestFireMd = true; p2PlasmaEnergy -= pCost2; p2PlasmaCD = 0.15; mobileAutoSeq++;
+      }
+    } else {
+      if (p2MissileCD <= 0 && p2MissileEnergy >= missileCost) {
+        guestFireRd = true; p2MissileEnergy -= missileCost; p2MissileCD = 0.5; mobileAutoSeq = 0;
+      } else if (p2PlasmaCD <= 0 && p2PlasmaEnergy >= pCost2) {
+        guestFireMd = true; p2PlasmaEnergy -= pCost2; p2PlasmaCD = 0.15; mobileAutoSeq = 0;
       }
     }
   }
