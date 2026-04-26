@@ -149,7 +149,7 @@ canvas { display: block; }
              text-align:center;width:180px;padding:6px;outline:none;font-family:inherit;text-transform:uppercase">
     <div class="net-btns">
       <button class="net-btn" id="joinConnectBtn">JOIN</button>
-      <button class="net-btn" id="pasteCodeBtn">PASTE</button>
+      <button class="net-btn" id="pasteCodeBtn">PASTE CODE</button>
       <button class="net-btn dim" id="joinBackBtn">BACK</button>
     </div>
     <div class="net-msg" id="joinMsg"></div>
@@ -2088,12 +2088,12 @@ function drawHUD() {
   ctx.fillStyle = '#ff0';
   glow(6, '#ff0');
   ctx.font = '20px Courier New';
-  ctx.fillText('SCORE: ' + score, W / 2, 34);
+  ctx.fillText('SCORE: ' + score, W / 2, 58);
   glow(0);
   ctx.fillStyle = '#0f0';
   glow(6, '#0f0');
   ctx.font = '16px Courier New';
-  ctx.fillText('WAVE ' + wave, W / 2, 56);
+  ctx.fillText('WAVE ' + wave, W / 2, 80);
   glow(0);
   ctx.textAlign = 'left';
 
