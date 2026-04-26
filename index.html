@@ -2085,17 +2085,17 @@ function drawHUD() {
   ctx.fillText(livesLabel, barX, missBarY + 8 + 18);
   glow(0);
 
-  // Score + Wave — top centre
-  ctx.textAlign = 'center';
+  // Score + Wave — bottom right
+  ctx.textAlign = 'right';
   ctx.fillStyle = '#ff0';
   glow(6, '#ff0');
   ctx.font = '20px Courier New';
-  ctx.fillText('SCORE: ' + score, W / 2, 58);
+  ctx.fillText('SCORE: ' + score, W - 16, H - 36);
   glow(0);
   ctx.fillStyle = '#0f0';
   glow(6, '#0f0');
   ctx.font = '16px Courier New';
-  ctx.fillText('WAVE ' + wave, W / 2, 80);
+  ctx.fillText('WAVE ' + wave, W - 16, H - 14);
   glow(0);
   ctx.textAlign = 'left';
 
