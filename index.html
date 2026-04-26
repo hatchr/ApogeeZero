@@ -1093,7 +1093,9 @@ function updatePlayer(dt) {
 function updatePlayer2(dt) {
   if (!player2 || netRole !== 'host') return;
   let gi = guestInput;
-  // Position/angle/velocity are now guest-authoritative (set in _onChannelMessage)
+  // Position/angle/velocity are guest-authoritative (set in _onChannelMessage).
+  // Extrapolate forward each frame so P2 looks smooth to P1 between input packets.
+  player2.x += player2.vx * dt; player2.y += player2.vy * dt;
   gi.mx = 0; gi.mr = 0;
 
   // Exhaust
@@ -1643,6 +1645,7 @@ function update(dt) {
     if (p2SpreadTimer  > 0) p2SpreadTimer  -= dt;
     if (p2HomingTimer  > 0) p2HomingTimer  -= dt;
     _guestUpdatePlayer2(dt);
+    player.x += player.vx * dt; player.y += player.vy * dt;
     for (let e of enemies)    { e.x += e.vx * dt; e.y += e.vy * dt; }
     for (let a of allies)     { a.x += a.vx * dt; a.y += a.vy * dt; }
     for (let p of projectiles) { p.x += p.vx * dt; p.y += p.vy * dt; }
