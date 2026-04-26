@@ -1583,10 +1583,16 @@ function updatePowerups(dt) {
       }
     }
 
-    // Powerups gravitate toward player
-    let force = 5000000 / (distSq + 500);
-    pu.vx += nx * force * dt;
-    pu.vy += ny * force * dt;
+    // Powerups gravitate toward nearest player
+    let gravDx = dx, gravDy = dy, gravDistSq = distSq;
+    if (player2 && !player2.ghost) {
+      let dx2 = player2.x - pu.x, dy2 = player2.y - pu.y, dSq2 = dx2*dx2 + dy2*dy2;
+      if (dSq2 < gravDistSq) { gravDx = dx2; gravDy = dy2; gravDistSq = dSq2; }
+    }
+    let { nx: gnx, ny: gny } = normalized(gravDx, gravDy, 0);
+    let force = 5000000 / (gravDistSq + 500);
+    pu.vx += gnx * force * dt;
+    pu.vy += gny * force * dt;
     let damp = Math.pow(0.97, dt * 60);
     pu.vx *= damp;
     pu.vy *= damp;
@@ -1650,6 +1656,7 @@ function update(dt) {
     for (let e of enemies)    { e.x += e.vx * dt; e.y += e.vy * dt; }
     for (let a of allies)     { a.x += a.vx * dt; a.y += a.vy * dt; }
     for (let p of projectiles) { p.x += p.vx * dt; p.y += p.vy * dt; }
+    for (let p of powerups)    { p.x += p.vx * dt; p.y += p.vy * dt; }
     _sendGuestInput();  // sends pre-bounce position so host can detect collision + apply damage
     // Apply bounce locally after sending — host and guest use same math, positions stay in sync
     if (player2 && !player2.ghost) {
