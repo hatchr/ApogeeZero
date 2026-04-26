@@ -2286,7 +2286,9 @@ document.getElementById('restartBtn').addEventListener('click', () => {
   gameOverActive = false;
 
   if (netRole === 'host') {
-    // Re-show host panel and reconnect with same ID
+    // Signal guest first so it lands on join panel instead of "host disconnected"
+    if (netConnected) _netSend({ t: 'restart' });
+    netConnected = false; // prevent the incoming close event from resetting netRole
     let bar = document.getElementById('netStatus');
     bar.textContent = ''; bar.classList.remove('active'); bar.style.color = '';
     document.getElementById('startScreen').classList.remove('hidden');
@@ -2295,17 +2297,22 @@ document.getElementById('restartBtn').addEventListener('click', () => {
     document.getElementById('hostCode').textContent = '—';
     document.getElementById('hostMsg').textContent = 'Reconnecting…';
     netRole = 'host';
-    startHost().then(id => {
-      document.getElementById('hostCode').textContent = id;
-      document.getElementById('hostMsg').textContent = 'Give that code to your partner, then wait.';
-    }).catch(() => {
-      document.getElementById('hostMsg').textContent = 'Could not reconnect — check your connection.';
-    });
+    // Delay slightly so the restart message flushes before we tear down the peer
+    setTimeout(() => {
+      startHost().then(id => {
+        document.getElementById('hostCode').textContent = id;
+        document.getElementById('hostMsg').textContent = 'Give that code to your partner, then wait.';
+      }).catch(() => {
+        document.getElementById('hostMsg').textContent = 'Could not reconnect — check your connection.';
+      });
+    }, 120);
     return;
   }
 
   if (netRole === 'guest') {
-    // Re-show join panel with last code pre-filled
+    // Tear down old connection first so stale disconnect events don't reset our UI
+    netConnected = false;
+    _destroyPeer();
     let bar = document.getElementById('netStatus');
     bar.textContent = ''; bar.classList.remove('active'); bar.style.color = '';
     document.getElementById('startScreen').classList.remove('hidden');
@@ -2619,7 +2626,9 @@ function _onDisconnect() {
   _destroyPeer();
 
   if (netRole === 'host') {
-    // Guest dropped — demote to solo, game continues
+    // If game over screen is up, guest hit Play Again — stay in host role, don't demote
+    if (gameOverActive) return;
+    // Guest dropped during gameplay — demote to solo, game continues
     player2 = null;
     netRole = null;
     let bar = document.getElementById('netStatus');
@@ -2795,6 +2804,18 @@ function _onChannelMessage(msg) {
     _applyHostState(msg);
   } else if (netRole === 'guest' && msg.t === 'gameover') {
     gameOver();
+  } else if (netRole === 'guest' && msg.t === 'restart') {
+    // Host is restarting — pre-empt the disconnect so we land on the join panel
+    netConnected = false;
+    _destroyPeer();
+    let bar = document.getElementById('netStatus');
+    bar.textContent = ''; bar.classList.remove('active'); bar.style.color = '';
+    document.getElementById('startScreen').classList.remove('hidden');
+    document.querySelector('.btn-row').style.display = 'none';
+    document.getElementById('joinPanel').classList.add('active');
+    document.getElementById('joinCodeInput').value = _lastGuestCode || '';
+    document.getElementById('joinMsg').textContent = 'Host is reconnecting — click Connect when ready.';
+    netRole = 'guest';
   }
 }
 
