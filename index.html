@@ -2870,7 +2870,8 @@ function _sendHostState() {
 function _applyHostState(msg) {
   if (msg.p1) {
     let p = msg.p1;
-    player.x = p.x; player.y = p.y; player.vx = p.vx; player.vy = p.vy;
+    player.x += (p.x - player.x) * 0.5; player.y += (p.y - player.y) * 0.5;
+    player.vx = p.vx; player.vy = p.vy; // snap velocity so extrapolation stays accurate
     player.angle = p.angle; player.hp = p.hp;
     lives = p.lives; invincTimer = p.inv; player.ghost = !!p.gh;
     shieldTimer = p.sh; spreadTimer = p.sp; empTimer = p.em; homingTimer = p.ho;
@@ -2910,6 +2911,15 @@ function _applyHostState(msg) {
       sndExplosion(false);
     }
   }
+  for (let ne of newEnemies) {
+    let best = null, bestDist = 500;
+    for (let oe of enemies) {
+      if (oe.type !== ne.type) continue;
+      let d = Math.hypot(oe.x - ne.x, oe.y - ne.y);
+      if (d < bestDist) { bestDist = d; best = oe; }
+    }
+    if (best) { ne.x = best.x + (ne.x - best.x) * 0.5; ne.y = best.y + (ne.y - best.y) * 0.5; }
+  }
   enemies = newEnemies;
 
   // Diff projectiles — detect hits (disappeared with life remaining)
@@ -2932,6 +2942,14 @@ function _applyHostState(msg) {
   for (let old of allies) {
     let alive = newAllies.some(a => Math.hypot(a.x - old.x, a.y - old.y) < 500);
     if (!alive) { spawnParticles(old.x, old.y, '#0ff', 20, 200); sndExplosion(false); screenShake(0.15); }
+  }
+  for (let na of newAllies) {
+    let best = null, bestDist = 500;
+    for (let oa of allies) {
+      let d = Math.hypot(oa.x - na.x, oa.y - na.y);
+      if (d < bestDist) { bestDist = d; best = oa; }
+    }
+    if (best) { na.x = best.x + (na.x - best.x) * 0.5; na.y = best.y + (na.y - best.y) * 0.5; }
   }
   allies = newAllies;
 
