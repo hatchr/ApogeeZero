@@ -2279,13 +2279,46 @@ document.getElementById('submitScore').addEventListener('click', () => {
 });
 
 document.getElementById('restartBtn').addEventListener('click', () => {
-  if (netRole) { window.location.reload(); return; }
-  _initAudio();
   document.getElementById('gameOver').classList.remove('active');
   document.getElementById('submitScore').disabled = false;
   document.getElementById('submitScore').textContent = 'SAVE SCORE';
   document.getElementById('nameInput').value = readSavedPlayerName();
   gameOverActive = false;
+
+  if (netRole === 'host') {
+    // Re-show host panel and reconnect with same ID
+    let bar = document.getElementById('netStatus');
+    bar.textContent = ''; bar.classList.remove('active'); bar.style.color = '';
+    document.getElementById('startScreen').classList.remove('hidden');
+    document.querySelector('.btn-row').style.display = 'none';
+    document.getElementById('hostPanel').classList.add('active');
+    document.getElementById('hostCode').textContent = '—';
+    document.getElementById('hostMsg').textContent = 'Reconnecting…';
+    netRole = 'host';
+    startHost().then(id => {
+      document.getElementById('hostCode').textContent = id;
+      document.getElementById('hostMsg').textContent = 'Give that code to your partner, then wait.';
+    }).catch(() => {
+      document.getElementById('hostMsg').textContent = 'Could not reconnect — check your connection.';
+    });
+    return;
+  }
+
+  if (netRole === 'guest') {
+    // Re-show join panel with last code pre-filled
+    let bar = document.getElementById('netStatus');
+    bar.textContent = ''; bar.classList.remove('active'); bar.style.color = '';
+    document.getElementById('startScreen').classList.remove('hidden');
+    document.querySelector('.btn-row').style.display = 'none';
+    document.getElementById('joinPanel').classList.add('active');
+    document.getElementById('joinCodeInput').value = _lastGuestCode || '';
+    document.getElementById('joinMsg').textContent = '';
+    netRole = 'guest';
+    return;
+  }
+
+  // Solo restart
+  _initAudio();
   initGame();
   showMobileControls(true);
   gameRunning = true;
@@ -2335,7 +2368,7 @@ document.getElementById('copyOfferBtn').addEventListener('click', () => {
 document.getElementById('joinBtn').addEventListener('click', () => {
   document.querySelector('.btn-row').style.display = 'none';
   document.getElementById('joinPanel').classList.add('active');
-  document.getElementById('joinCodeInput').value = '';
+  document.getElementById('joinCodeInput').value = _lastGuestCode || '';
   document.getElementById('joinMsg').textContent = '';
   netRole = 'guest';
   setTimeout(() => document.getElementById('joinCodeInput').focus(), 50);
@@ -2351,7 +2384,7 @@ document.getElementById('joinConnectBtn').addEventListener('click', () => {
   if (!code) { document.getElementById('joinMsg').textContent = 'Enter the host\'s code first.'; return; }
   document.getElementById('joinMsg').textContent = 'Connecting…';
   startJoin(code).then(() => {
-    // _onNetConnected fires automatically on channel open
+    _lastGuestCode = code;
   }).catch(() => {
     document.getElementById('joinMsg').textContent = 'Could not connect — check the code and try again.';
   });
@@ -2531,11 +2564,25 @@ function _makePeer(id) {
   return new Peer(id, { config: { iceServers: ICE_SERVERS } });
 }
 
+let _lastHostId = null, _lastGuestCode = null;
 function startHost() {
   _destroyPeer();
   return new Promise((resolve, reject) => {
-    _peerjs = _makePeer(_shortId());
-    _peerjs.on('open', id => resolve(id));
+    let tryId = _lastHostId || _shortId();
+    _peerjs = _makePeer(tryId);
+    _peerjs.on('open', id => { _lastHostId = id; resolve(id); });
+    _peerjs.on('error', err => {
+      // ID may still be taken on server — fall back to a fresh one
+      if (_lastHostId && (err.type === 'unavailable-id' || err.type === 'server-error')) {
+        _lastHostId = null; _peerjs.destroy();
+        _peerjs = _makePeer(_shortId());
+        _peerjs.on('open', id => { _lastHostId = id; resolve(id); });
+        _peerjs.on('error', reject);
+        _peerjs.on('connection', conn => { _conn = conn; conn.on('open', () => { netConnected = true; netLost = false; _onNetConnected(); }); conn.on('data', _onChannelMessage); conn.on('close', _onDisconnect); conn.on('error', _onDisconnect); });
+        return;
+      }
+      reject(err);
+    });
     _peerjs.on('error', reject);
     _peerjs.on('connection', conn => {
       _conn = conn;
