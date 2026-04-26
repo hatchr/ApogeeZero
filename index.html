@@ -521,10 +521,11 @@ function nextWave() {
 }
 
 function safeSpawnPoint(baseDist) {
+  let anchor = (player2 && !player2.ghost && Math.random() < 0.5) ? player2 : player;
   for (let attempts = 0; attempts < 20; attempts++) {
     let angle = Math.random() * Math.PI * 2;
-    let sx = player.x + Math.cos(angle) * baseDist;
-    let sy = player.y + Math.sin(angle) * baseDist;
+    let sx = anchor.x + Math.cos(angle) * baseDist;
+    let sy = anchor.y + Math.sin(angle) * baseDist;
     let safe = true;
     for (let pl of planets) {
       let dx = sx - pl.x, dy = sy - pl.y;
@@ -534,7 +535,7 @@ function safeSpawnPoint(baseDist) {
   }
   // Fallback — just pick the last attempt
   let angle = Math.random() * Math.PI * 2;
-  return { x: player.x + Math.cos(angle) * baseDist, y: player.y + Math.sin(angle) * baseDist };
+  return { x: anchor.x + Math.cos(angle) * baseDist, y: anchor.y + Math.sin(angle) * baseDist };
 }
 
 function spawnAlly() {
