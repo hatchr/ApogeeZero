@@ -169,7 +169,7 @@ canvas { display: block; }
 <div id="joystickBase"><div id="joystickStick"></div></div>
 <div id="rJoyBase"><div id="rJoyStick"></div></div>
 <div id="netStatus"></div>
-<div id="viewToggleBtn" style="display:none;position:fixed;top:30px;left:50%;transform:translateX(-50%);color:#0ff;font:bold 13px 'Courier New',monospace;text-shadow:0 0 6px #0ff;background:rgba(0,0,0,0.6);border:1px solid #0ff;padding:4px 14px;border-radius:4px;z-index:21;cursor:pointer;letter-spacing:1px;">FREE VIEW</div>
+<div id="viewToggleBtn" style="display:none;position:fixed;bottom:16px;left:50%;transform:translateX(-50%);color:#0ff;font:bold 13px 'Courier New',monospace;text-shadow:0 0 6px #0ff;background:rgba(0,0,0,0.6);border:1px solid #0ff;padding:4px 14px;border-radius:4px;z-index:21;cursor:pointer;letter-spacing:1px;">FREE</div>
 <div id="arcadeIndicator" style="display:none;position:fixed;bottom:10px;left:12px;color:#ff0;font:bold 18px 'Courier New',monospace;text-shadow:0 0 8px #ff0;pointer-events:none;z-index:999;">*</div>
 <script>
 const canvas = document.getElementById('c');
@@ -1869,7 +1869,7 @@ function draw() {
     ctx.textAlign = 'center';
     ctx.fillStyle = '#0ff';
     glow(10, '#0ff');
-    ctx.fillText(shipUpView ? 'SHIP-UP VIEW' : 'FREE VIEW', W / 2, H / 2 + 30);
+    ctx.fillText(shipUpView ? 'SHIP-UP' : 'FREE', W / 2, H / 2 + 30);
     glow(0);
     ctx.restore();
   }
@@ -3011,7 +3011,7 @@ requestAnimationFrame(t => { lastTime = t; requestAnimationFrame(loop); });
   }
   var viewBtn = document.getElementById('viewToggleBtn');
   function updateViewBtn() {
-    viewBtn.textContent = shipUpView ? 'SHIP-UP VIEW' : 'FREE VIEW';
+    viewBtn.textContent = shipUpView ? 'SHIP-UP' : 'FREE';
   }
   if (isMobile) {
     viewBtn.style.display = 'block';
