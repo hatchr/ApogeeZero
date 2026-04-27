@@ -169,6 +169,7 @@ canvas { display: block; }
 <div id="joystickBase"><div id="joystickStick"></div></div>
 <div id="rJoyBase"><div id="rJoyStick"></div></div>
 <div id="netStatus"></div>
+<div id="viewToggleBtn" style="display:none;position:fixed;top:30px;left:50%;transform:translateX(-50%);color:#0ff;font:bold 13px 'Courier New',monospace;text-shadow:0 0 6px #0ff;background:rgba(0,0,0,0.6);border:1px solid #0ff;padding:4px 14px;border-radius:4px;z-index:21;cursor:pointer;letter-spacing:1px;">FREE VIEW</div>
 <div id="arcadeIndicator" style="display:none;position:fixed;bottom:10px;left:12px;color:#ff0;font:bold 18px 'Courier New',monospace;text-shadow:0 0 8px #ff0;pointer-events:none;z-index:999;">*</div>
 <script>
 const canvas = document.getElementById('c');
@@ -1875,8 +1876,11 @@ function draw() {
 
   if (!player) return;
 
-  // Precompute world rotation for ship-up view
-  let _wr = shipUpView ? (-Math.PI / 2 - player.angle) : 0;
+  // Local player (guest sees their own ship; host sees theirs)
+  let _localShip = (netRole === 'guest' && player2) ? player2 : player;
+
+  // Precompute world rotation for ship-up view — always based on local player's angle
+  let _wr = shipUpView ? (-Math.PI / 2 - _localShip.angle) : 0;
   let _wrc = Math.cos(_wr), _wrs = Math.sin(_wr);
 
   // Stars (parallax) — screen space, rotated around screen centre in ship-up view
@@ -3005,6 +3009,20 @@ requestAnimationFrame(t => { lastTime = t; requestAnimationFrame(loop); });
       else localStorage.removeItem('sd_arcadeMode');
     } catch(ex) {}
   }
+  var viewBtn = document.getElementById('viewToggleBtn');
+  function updateViewBtn() {
+    viewBtn.textContent = shipUpView ? 'SHIP-UP VIEW' : 'FREE VIEW';
+  }
+  if (isMobile) {
+    viewBtn.style.display = 'block';
+    viewBtn.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      shipUpView = !shipUpView;
+      shipUpToast = 2.5;
+      updateViewBtn();
+    });
+  }
+
   window.addEventListener('keydown', function(e) {
     if (e.code === 'KeyQ') _q = true;
     if (e.code === 'KeyE') _e = true;
@@ -3013,6 +3031,7 @@ requestAnimationFrame(t => { lastTime = t; requestAnimationFrame(loop); });
       e.preventDefault();
       shipUpView = !shipUpView;
       shipUpToast = 2.5;
+      updateViewBtn();
     }
   });
   window.addEventListener('keyup', function(e) {
