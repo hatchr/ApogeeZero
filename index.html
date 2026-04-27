@@ -169,6 +169,7 @@ canvas { display: block; }
 <div id="joystickBase"><div id="joystickStick"></div></div>
 <div id="rJoyBase"><div id="rJoyStick"></div></div>
 <div id="netStatus"></div>
+<div id="arcadeIndicator" style="display:none;position:fixed;bottom:10px;left:12px;color:#ff0;font:bold 18px 'Courier New',monospace;text-shadow:0 0 8px #ff0;pointer-events:none;z-index:999;">*</div>
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -394,8 +395,13 @@ let guestFireMd = false, guestFireRd = false; // set by guest-side autofire
 
 const STORAGE_KEYS = {
   leaderboard: 'sd_leaderboard',
-  playerName: 'sd_playerName'
+  playerName: 'sd_playerName',
+  arcadeMode: 'sd_arcadeMode'
 };
+
+let arcadeMode = !!localStorage.getItem(STORAGE_KEYS.arcadeMode);
+let arcadeToast = 0;
+if (arcadeMode) document.getElementById('arcadeIndicator').style.display = 'block';
 
 // Stars
 function makeStars() {
@@ -1044,8 +1050,9 @@ function mobileAutofireTarget(ship) {
 }
 
 function updatePlayer(dt) {
-  // Player rotation — mouse on desktop; right joystick applies a rate-based turn on mobile
+  // Player rotation — mouse on desktop; right joystick on mobile; Z/X in arcade mode
   if (isMobile && mRJoyDX !== 0) player.angle += mRJoyDX * RJOY_RATE * dt;
+  if (arcadeMode) player.angle += ((keys['x'] ? 1 : 0) - (keys['z'] ? 1 : 0)) * 2.5 * dt;
   player.angle += mouseDX * 0.004;
   mouseDX = 0;
 
@@ -1076,8 +1083,8 @@ function updatePlayer(dt) {
   player.hp = Math.min(player.maxHp, player.hp + 2 * dt);
   fireWeapons(player, 'player', mouseDown, rightDown);
 
-  // Mobile autofire: plasma → plasma → plasma → missile, repeat.
-  if (isMobile && enemies.length > 0 && mobileAutofireTarget(player)) {
+  // Autofire in mobile and arcade mode: plasma → plasma → plasma → missile, repeat.
+  if ((isMobile || arcadeMode) && enemies.length > 0 && mobileAutofireTarget(player)) {
     let fx = player.x + Math.cos(player.angle) * 20;
     let fy = player.y + Math.sin(player.angle) * 20;
     let pCost = spreadTimer > 0 ? plasmaCost * 3 : plasmaCost;
@@ -1842,6 +1849,18 @@ function draw() {
   ctx.fillStyle = '#080810';
   ctx.fillRect(0, 0, W, H);
 
+  if (arcadeToast > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, arcadeToast);
+    ctx.font = 'bold 20px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ff0';
+    glow(10, '#ff0');
+    ctx.fillText(arcadeMode ? 'ARCADE MODE ON' : 'ARCADE MODE OFF', W / 2, H / 2);
+    glow(0);
+    ctx.restore();
+  }
+
   if (!player) return;
 
   // Stars (parallax) — screen space, unaffected by world zoom
@@ -2009,6 +2028,7 @@ function draw() {
 
   // HUD
   drawHUD();
+
 }
 
 function drawBar(x, y, w, h, pct, color, label, labelColor) {
@@ -2540,6 +2560,7 @@ function mobileSetup() {
 function loop(time) {
   let dt = Math.min((time - lastTime) / 1000, 0.05);
   lastTime = time;
+  if (arcadeToast > 0) arcadeToast = Math.max(0, arcadeToast - dt);
   update(dt);
   draw();
   requestAnimationFrame(loop);
@@ -2935,6 +2956,29 @@ function _applyHostState(msg) {
 
 mobileSetup();
 requestAnimationFrame(t => { lastTime = t; requestAnimationFrame(loop); });
+
+// Arcade stick toggle — Q+E simultaneously, completely isolated from game input
+(function() {
+  var _q = false, _e = false;
+  var ind = document.getElementById('arcadeIndicator');
+  function applyArcadeMode() {
+    ind.style.display = arcadeMode ? 'block' : 'none';
+    arcadeToast = 2.5;
+    try {
+      if (arcadeMode) localStorage.setItem('sd_arcadeMode', '1');
+      else localStorage.removeItem('sd_arcadeMode');
+    } catch(ex) {}
+  }
+  window.addEventListener('keydown', function(e) {
+    if (e.code === 'KeyQ') _q = true;
+    if (e.code === 'KeyE') _e = true;
+    if (_q && _e) { arcadeMode = !arcadeMode; applyArcadeMode(); }
+  });
+  window.addEventListener('keyup', function(e) {
+    if (e.code === 'KeyQ') _q = false;
+    if (e.code === 'KeyE') _e = false;
+  });
+})();
 </script>
 </body>
 </html>
