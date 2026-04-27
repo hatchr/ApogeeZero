@@ -362,6 +362,7 @@ let missileEnergy = 100, missileMax = 100, missileRecharge = 8; // per second
 let plasmaCost = 5, missileCost = 20;
 let camX = 0, camY = 0;
 let shakeX = 0, shakeY = 0, shakeDur = 0;
+let shipUpView = false, shipUpToast = 0;
 let mJoyId = null, mJoyBX = 0, mJoyBY = 0;
 let mRJoyId = null, mRJoyBX = 0, mRJoyDX = 0;
 let mobileAutoSeq = 0;
@@ -1860,19 +1861,40 @@ function draw() {
     glow(0);
     ctx.restore();
   }
+  if (shipUpToast > 0) {
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, shipUpToast);
+    ctx.font = 'bold 20px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#0ff';
+    glow(10, '#0ff');
+    ctx.fillText(shipUpView ? 'SHIP-UP VIEW' : 'FREE VIEW', W / 2, H / 2 + 30);
+    glow(0);
+    ctx.restore();
+  }
 
   if (!player) return;
 
-  // Stars (parallax) — screen space, unaffected by world zoom
+  // Precompute world rotation for ship-up view
+  let _wr = shipUpView ? (-Math.PI / 2 - player.angle) : 0;
+  let _wrc = Math.cos(_wr), _wrs = Math.sin(_wr);
+
+  // Stars (parallax) — screen space, rotated around screen centre in ship-up view
   for (let s of stars) {
     let sx = ((s.x - camX * s.depth) % 2000 + 3000) % 2000 - 1000 + W/2;
     let sy = ((s.y - camY * s.depth) % 2000 + 3000) % 2000 - 1000 + H/2;
+    if (shipUpView) {
+      let dx = sx - W/2, dy = sy - H/2;
+      sx = W/2 + dx * _wrc - dy * _wrs;
+      sy = H/2 + dx * _wrs + dy * _wrc;
+    }
     ctx.fillStyle = `rgba(${s.brightness},${s.brightness},${Math.min(255,s.brightness+50)},${0.5+s.depth*0.5})`;
     ctx.fillRect(sx + shakeX, sy + shakeY, s.size, s.size);
   }
 
   ctx.save();
   ctx.translate(W/2 + shakeX, H/2 + shakeY);
+  if (shipUpView) ctx.rotate(_wr);
   ctx.scale(viewZoom, viewZoom);
   ctx.translate(-camX, -camY);
 
@@ -2152,9 +2174,16 @@ function drawHUD() {
   ctx.stroke();
 
   // Helper to plot a blip (centered on local player)
+  let _rwr = shipUpView ? (-Math.PI / 2 - localPlayer.angle) : 0;
+  let _rwrc = Math.cos(_rwr), _rwrs = Math.sin(_rwr);
   function blip(wx, wy, color, size) {
     let dx = (wx - localPlayer.x) / radarRange * radarR;
     let dy = (wy - localPlayer.y) / radarRange * radarR;
+    if (shipUpView) {
+      let rdx = dx * _rwrc - dy * _rwrs;
+      let rdy = dx * _rwrs + dy * _rwrc;
+      dx = rdx; dy = rdy;
+    }
     let dist = Math.sqrt(dx * dx + dy * dy);
     if (dist > radarR - 2) {
       // Clamp to edge
@@ -2169,6 +2198,11 @@ function drawHUD() {
   for (let pl of planets) {
     let dx = (pl.x - localPlayer.x) / radarRange * radarR;
     let dy = (pl.y - localPlayer.y) / radarRange * radarR;
+    if (shipUpView) {
+      let rdx = dx * _rwrc - dy * _rwrs;
+      let rdy = dx * _rwrs + dy * _rwrc;
+      dx = rdx; dy = rdy;
+    }
     let pr = Math.max(2, pl.radius / radarRange * radarR);
     ctx.fillStyle = 'rgba(255,255,255,0.1)';
     ctx.beginPath();
@@ -2198,9 +2232,10 @@ function drawHUD() {
   ctx.fillRect(radarX - 1.5, radarY - 1.5, 3, 3);
   ctx.strokeStyle = dotColor;
   ctx.lineWidth = 1;
+  let _facingAngle = shipUpView ? -Math.PI / 2 : localPlayer.angle;
   ctx.beginPath();
   ctx.moveTo(radarX, radarY);
-  ctx.lineTo(radarX + Math.cos(localPlayer.angle) * 10, radarY + Math.sin(localPlayer.angle) * 10);
+  ctx.lineTo(radarX + Math.cos(_facingAngle) * 10, radarY + Math.sin(_facingAngle) * 10);
   ctx.stroke();
 
   ctx.restore();
@@ -2561,6 +2596,7 @@ function loop(time) {
   let dt = Math.min((time - lastTime) / 1000, 0.05);
   lastTime = time;
   if (arcadeToast > 0) arcadeToast = Math.max(0, arcadeToast - dt);
+  if (shipUpToast > 0) shipUpToast = Math.max(0, shipUpToast - dt);
   update(dt);
   draw();
   requestAnimationFrame(loop);
@@ -2973,6 +3009,11 @@ requestAnimationFrame(t => { lastTime = t; requestAnimationFrame(loop); });
     if (e.code === 'KeyQ') _q = true;
     if (e.code === 'KeyE') _e = true;
     if (_q && _e) { arcadeMode = !arcadeMode; applyArcadeMode(); }
+    if (e.code === 'Tab') {
+      e.preventDefault();
+      shipUpView = !shipUpView;
+      shipUpToast = 2.5;
+    }
   });
   window.addEventListener('keyup', function(e) {
     if (e.code === 'KeyQ') _q = false;
